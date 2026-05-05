@@ -352,7 +352,6 @@ class AsyncOmniEngine:
         logger.info(f"[my-debug] single_stage_mode {self.single_stage_mode}")
         logger.info(f"[my-debug] async_chunk {self.async_chunk}")
 
-
         # Launch orchestrator background thread
         startup_future: concurrent.futures.Future = concurrent.futures.Future()
 
@@ -1464,9 +1463,11 @@ class AsyncOmniEngine:
                     ) from exc
             else:
                 stage_overrides = stage_overrides_json
-        logger.info(f"[my-debug] _resolve_stage_configs base_kwargs {base_kwargs} \n stage_configs_path {stage_configs_path}"
-                    f"\n deploy_config_path {deploy_config_path} \n stage_overrides {stage_overrides} \n "
-                    f"default_stage_cfg_factory {self._create_default_diffusion_stage_cfg(kwargs)}")
+        logger.info(
+            f"[my-debug] _resolve_stage_configs base_kwargs {base_kwargs} \n stage_configs_path {stage_configs_path}"
+            f"\n deploy_config_path {deploy_config_path} \n stage_overrides {stage_overrides} \n "
+            f"default_stage_cfg_factory {self._create_default_diffusion_stage_cfg(kwargs)}"
+        )
 
         config_path, stage_configs = load_and_resolve_stage_configs(
             model,
