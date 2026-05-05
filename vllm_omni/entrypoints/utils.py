@@ -353,6 +353,7 @@ def resolve_model_config_path(model: str) -> str:
     stage_config_path = PROJECT_ROOT / stage_config_file
     if not os.path.exists(stage_config_path):
         return None
+    logger.info(f"[my-debug] resolve_model_config_path model is {model} stage_config_path is {stage_config_path}")
     return str(stage_config_path)
 
 

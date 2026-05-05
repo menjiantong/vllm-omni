@@ -348,6 +348,10 @@ class AsyncOmniEngine:
         self._rpc_lock = threading.Lock()
 
         logger.info(f"[AsyncOmniEngine] Launching Orchestrator thread with {self.num_stages} stages")
+        logger.info(f"[my-debug] config_path {self.config_path}")
+        logger.info(f"[my-debug] single_stage_mode {self.single_stage_mode}")
+        logger.info(f"[my-debug] async_chunk {self.async_chunk}")
+
 
         # Launch orchestrator background thread
         startup_future: concurrent.futures.Future = concurrent.futures.Future()
@@ -724,6 +728,11 @@ class AsyncOmniEngine:
 
         prepare_engine_environment()
         omni_transfer_config = load_omni_transfer_config_for_model(self.model, self.config_path)
+        logger.info(f"[my-debug] model {self.model}")
+        logger.info(f"[my-debug] omni_transfer_config {omni_transfer_config}")
+        logger.info(f"[my-debug] stage len is  {len(self.stage_configs)}")
+        for stage_cfg in self.stage_configs:
+            logger.info(f"[my-debug] stage_configs index  {stage_cfg} type is {type(stage_cfg)}")
 
         # ------------------------------------------------------------------ #
         # Single-stage mode: start OmniMasterServer before launching stages.  #
@@ -1425,6 +1434,7 @@ class AsyncOmniEngine:
 
     def _resolve_stage_configs(self, model: str, kwargs: dict[str, Any]) -> tuple[str, list[Any]]:
         """Resolve stage configs and inject defaults shared by orchestrator/headless."""
+        logger.info(f"[my-debug] _resolve_stage_configs  model {model} kwargs {kwargs}")
 
         stage_configs_path = kwargs.get("stage_configs_path", None)
         deploy_config_path = kwargs.pop("deploy_config", None)
@@ -1454,6 +1464,9 @@ class AsyncOmniEngine:
                     ) from exc
             else:
                 stage_overrides = stage_overrides_json
+        logger.info(f"[my-debug] _resolve_stage_configs base_kwargs {base_kwargs} \n stage_configs_path {stage_configs_path}"
+                    f"\n deploy_config_path {deploy_config_path} \n stage_overrides {stage_overrides} \n "
+                    f"default_stage_cfg_factory {self._create_default_diffusion_stage_cfg(kwargs)}")
 
         config_path, stage_configs = load_and_resolve_stage_configs(
             model,
@@ -1463,6 +1476,7 @@ class AsyncOmniEngine:
             deploy_config_path=deploy_config_path,
             stage_overrides=stage_overrides,
         )
+        logger.info(f"[my-debug] _resolve_stage_configs  config_path {config_path} stage_configs {stage_configs}")
 
         # Inject diffusion LoRA-related knobs from kwargs if not present in the stage config.
         for cfg in stage_configs:
