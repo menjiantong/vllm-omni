@@ -83,7 +83,7 @@ def init_device(self) -> None:
     with set_forward_context(...), set_current_vllm_config(self.vllm_config):
         # 初始化 NCCL 通信
         init_distributed_environment(world_size=world_size, rank=rank)
-        
+
         # 初始化模型并行组
         initialize_model_parallel(
             data_parallel_size=...,
@@ -146,7 +146,7 @@ class ForwardContext:
     vllm_config: VllmConfig | None = None
     omni_diffusion_config: OmniDiffusionConfig | None = None
     attn_metadata: dict[str, AttentionMetadata] | None = None
-    
+
     # Sequence Parallel 相关
     sp_padding_size: int = 0
     sp_original_seq_len: int | None = None
@@ -192,7 +192,7 @@ class DiffusionModelRunner:
         self.cache_backend = None         # 缓存后端
         self.offload_backend = None       # Offload 后端
         self.state_cache: dict = {}       # Stepwise 状态缓存
-        
+
         # 初始化 KV Transfer 管理器
         self.kv_transfer_manager = OmniKVTransferManager.from_od_config(od_config)
 ```
@@ -325,26 +325,26 @@ def execute_model(self, req: OmniDiffusionRequest, od_config: OmniDiffusionConfi
     执行模型前向传播的核心方法。
     """
     assert self.model_runner is not None
-    
+
     # ========== 1. LoRA 处理 ==========
     if self.lora_manager is not None:
         self.lora_manager.set_active_adapter(
             req.sampling_params.lora_request,
             req.sampling_params.lora_scale
         )
-    
+
     # ========== 2. 性能分析上下文 ==========
     profiler = self._get_profiler()
     ctx = profiler.annotate_context_manager("diffusion_forward") if profiler else nullcontext()
-    
+
     # ========== 3. 委托给 ModelRunner ==========
     with ctx:
         output = self.model_runner.execute_model(req)
-    
+
     # ========== 4. Profiler 步进 ==========
     if profiler:
         profiler.step()
-    
+
     return output
 ```
 
@@ -356,31 +356,31 @@ def execute_model(self, req: OmniDiffusionRequest) -> DiffusionOutput:
     # HSDP 需要 no_grad()，其他用 inference_mode() 更快
     use_hsdp = self.od_config.parallel_config.use_hsdp
     grad_context = torch.no_grad() if use_hsdp else torch.inference_mode()
-    
+
     with grad_context:
         # ========== 2. KV Cache 接收（多模态连接器） ==========
         self.kv_transfer_manager.receive_multi_kv_cache_distributed(req, ...)
-        
+
         # ========== 3. 设置随机数生成器 ==========
         if req.sampling_params.generator is None and req.sampling_params.seed is not None:
             req.sampling_params.generator = torch.Generator(device=device).manual_seed(seed)
-        
+
         # ========== 4. 刷新缓存上下文 ==========
         if self.cache_backend is not None:
             self.cache_backend.refresh(pipeline, num_inference_steps)
-        
+
         # ========== 5. 重置内存统计 ==========
         if is_primary:
             platform.reset_peak_memory_stats()
-        
+
         # ========== 6. 执行前向传播 ==========
         with set_forward_context(vllm_config, omni_diffusion_config):
             output = self.pipeline.forward(req)
-        
+
         # ========== 7. 记录峰值内存 ==========
         if is_primary:
             self._record_peak_memory(output)
-        
+
         return output
 ```
 
@@ -400,7 +400,7 @@ def generate(self, request: OmniDiffusionRequest) -> DiffusionOutput:
 def execute_stepwise(self, scheduler_output: DiffusionSchedulerOutput) -> RunnerOutput:
     """
     执行单步扩散，支持细粒度调度。
-    
+
     与 execute_model 的区别：
     - execute_model: 一次性完成所有扩散步骤
     - execute_stepwise: 每次只执行一个步骤，由调度器控制
@@ -408,22 +408,22 @@ def execute_stepwise(self, scheduler_output: DiffusionSchedulerOutput) -> Runner
     with grad_context:
         # 更新请求状态
         state, is_new_request = self._update_states(scheduler_output)
-        
+
         if is_new_request:
             # 新请求：执行编码
             self.pipeline.prepare_encode(state)
-        
+
         # 执行去噪步骤
         noise_pred = self.pipeline.denoise_step(state)
-        
+
         # 执行调度器步骤
         self.pipeline.step_scheduler(state, noise_pred)
-        
+
         # 检查是否完成
         finished = state.denoise_completed
         if finished:
             result = self.pipeline.post_decode(state)
-        
+
         return RunnerOutput(req_id=state.req_id, finished=finished, result=result)
 ```
 
@@ -449,28 +449,28 @@ def sleep(self, level: int = 1) -> bool:
     """
     from vllm.device_allocator.cumem import CuMemAllocator
     allocator = CuMemAllocator.get_instance()
-    
+
     # Level 2: 保存 buffers 到 CPU
     if level == 2 and self.model_runner is not None:
         # 清理 CUDA Graph
         if hasattr(self.model_runner, "graph_runners"):
             self.model_runner.graph_runners.clear()
-        
+
         # 保存模型 buffers
         model = self.model_runner.pipeline
         self._sleep_saved_buffers = {
-            name: buffer.cpu().clone() 
+            name: buffer.cpu().clone()
             for name, buffer in model.named_buffers()
         }
-    
+
     # 执行 sleep
     offload_tags = ("weights",) if level == 1 else tuple()
     allocator.sleep(offload_tags=offload_tags)
-    
+
     # 清理缓存
     platform.empty_cache()
     platform.synchronize()
-    
+
     return True
 ```
 
@@ -483,11 +483,11 @@ def wake_up(self, tags: list[str] | None = None) -> bool:
     """
     from vllm.device_allocator.cumem import CuMemAllocator
     allocator = CuMemAllocator.get_instance()
-    
+
     # 激活内存池
     allocator.wake_up(tags)
     platform.synchronize()
-    
+
     # 恢复 buffers
     if len(self._sleep_saved_buffers) and self.model_runner is not None:
         model = self.model_runner.pipeline
@@ -495,7 +495,7 @@ def wake_up(self, tags: list[str] | None = None) -> bool:
             if name in self._sleep_saved_buffers:
                 buffer.data.copy_(self._sleep_saved_buffers[name].data)
         self._sleep_saved_buffers = {}
-    
+
     return True
 ```
 
@@ -509,19 +509,19 @@ def handle_sleep_task(self, task: OmniSleepTask) -> OmniACK:
         # 同步 GPU
         platform.synchronize()
         usage_before = platform.get_current_memory_usage(self.device)
-        
+
         # 执行 sleep
         self.sleep(level=task.level)
-        
+
         # 多 GPU 同步
         if torch.distributed.is_initialized():
             t_freed = torch.tensor([float(real_freed)], device=self.device)
             torch.distributed.all_reduce(t_freed)
-        
+
         # 仅 rank 0 返回 ACK
         if self.rank != 0:
             return None
-        
+
         return OmniACK(
             task_id=task.task_id,
             status="SUCCESS",

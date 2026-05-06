@@ -695,7 +695,7 @@ codec_eos_token_id = 4198   # 结束标记
 codec_bos_id = 4197         # 开始标记
 codec_pad_id = 4196         # 填充标记
 codec_think_id = 4202       # Think 标记
-codec_nothink_id = 4203     # Nothink 标记
+codec_nothink_id = 4203     # Nothing 标记
 
 # 有效码本值范围
 valid_codes = 0..2047       # 每层码本的有效值
