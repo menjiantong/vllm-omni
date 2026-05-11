@@ -206,10 +206,10 @@ class AsyncOmniEngine:
     request_queue: janus.Queue[dict]      # 同步端 -> Orchestrator
     output_queue: janus.Queue[dict]       # Orchestrator -> 同步端
     rpc_output_queue: janus.Queue[dict]   # RPC 响应队列
-    
+
     # 线程管理
     orchestrator_thread: threading.Thread  # 后台线程
-    
+
     # 阶段信息
     stage_clients: list[Any]              # 阶段客户端列表
     stage_vllm_configs: list[Any]         # 每阶段配置
@@ -266,23 +266,23 @@ class Orchestrator:
     request_async_queue: janus.AsyncQueue
     output_async_queue: janus.AsyncQueue
     rpc_async_queue: janus.AsyncQueue
-    
+
     # 阶段管理
     num_stages: int
     stage_clients: list[Any]          # StageEngineCoreClient 或 StageDiffusionClient
     output_processors: list[Any]      # MultimodalOutputProcessor 列表
     stage_vllm_configs: list[Any]
-    
+
     # 请求状态
     request_states: dict[str, OrchestratorRequestState]
-    
+
     # CFG 支持
     _cfg_tracker: CfgCompanionTracker
-    
+
     # PD disaggregation
     _pd_pair: tuple[int, int] | None  # (prefill_idx, decode_idx)
     _pd_kv_params: dict[str, Any]
-    
+
     # 控制
     _shutdown_event: asyncio.Event
     _fatal_error: str | None
@@ -315,13 +315,13 @@ async def _orchestration_loop() -> None:
         for stage_id in range(self.num_stages):
             # 1. 轮询原始输出
             raw_outputs = await self._poll_stage_raw(stage_id)
-            
+
             # 2. 处理 KV ready 信号
             await self._handle_kv_ready_raw_outputs(stage_id, raw_outputs)
-            
+
             # 3. 通过 OutputProcessor 处理
             request_outputs = await self._process_stage_outputs(stage_id, raw_outputs)
-            
+
             # 4. 路由输出
             for output in request_outputs:
                 await self._route_output(stage_id, output, req_state, metrics)
@@ -350,10 +350,10 @@ async def _orchestration_loop() -> None:
 ```python
 class StageEngineCoreClientBase:
     # 共享的阶段感知行为
-    
+
 class StageEngineCoreClient(StageEngineCoreClientBase, AsyncMPClient):
     # 标准单引擎客户端
-    
+
 class DPLBStageEngineCoreClient(StageEngineCoreClientBase, DPLBAsyncMPClient):
     # 数据并行负载均衡客户端
 ```
@@ -370,13 +370,13 @@ class StageEngineCoreClientBase:
     default_sampling_params: Any
     custom_process_input_func: Callable
     engine_input_source: list[int]       # 输入来自哪个阶段
-    
+
     # 引擎输出缓存
     engine_outputs: Any
-    
+
     # 进程管理
     _proc: multiprocessing.Process
-    
+
     # KV 传输
     _omni_kv_config: dict
     _kv_sender_host: str
@@ -412,7 +412,7 @@ def spawn_stage_core(vllm_config, executor_class, log_stats):
     # 1. 分配 ZMQ 地址
     addresses = get_engine_zmq_addresses(vllm_config)
     handshake_address = get_open_zmq_ipc_path()
-    
+
     # 2. 启动子进程
     proc = ctx.Process(
         target=StageEngineCoreProc.run_stage_core,
@@ -429,10 +429,10 @@ def spawn_stage_core(vllm_config, executor_class, log_stats):
 def complete_stage_handshake(proc, handshake_address, addresses, vllm_config, timeout):
     # 3. HELLO 握手
     identity, msg = _recv(poller, handshake_socket, proc, "HELLO", timeout)
-    
+
     # 4. 发送 INIT (地址信息)
     handshake_socket.send_multipart([identity, msgspec.msgpack.encode(init_payload)])
-    
+
     # 5. READY 握手 (num_gpu_blocks)
     identity, msg = _recv(poller, handshake_socket, proc, "READY", timeout)
     vllm_config.cache_config.num_gpu_blocks = msg.get("num_gpu_blocks")
@@ -469,23 +469,23 @@ class StageDiffusionClient:
     stage_id: int
     final_output: bool
     final_output_type: str
-    
+
     # 进程管理
     _proc: multiprocessing.Process
     _owns_process: bool
-    
+
     # ZMQ 通信
     _zmq_ctx: zmq.Context
     _request_socket: zmq.Socket    # PUSH
     _response_socket: zmq.Socket   # PULL
-    
+
     # 序列化
     _encoder: OmniMsgpackEncoder
     _decoder: OmniMsgpackDecoder
-    
+
     # 输出队列
     _output_queue: asyncio.Queue[OmniRequestOutput]
-    
+
     # 进程监控
     _engine_dead: bool
 ```
@@ -518,16 +518,16 @@ async def collective_rpc_async(method, timeout, args, kwargs) -> Any
 ```python
 class InlineStageDiffusionClient:
     stage_type: str = "diffusion"
-    
+
     # 引擎
     _engine: DiffusionEngine
-    
+
     # 线程池
     _executor: ThreadPoolExecutor  # max_workers=1
-    
+
     # 输出队列
     _output_queue: asyncio.Queue[OmniRequestOutput]
-    
+
     # 任务追踪
     _tasks: dict[str, asyncio.Task]
 ```
@@ -548,13 +548,13 @@ class InlineStageDiffusionClient:
 def run_diffusion_proc(cls, model, od_config, handshake_address, request_address, response_address):
     # 1. 创建实例
     proc = cls(model, od_config)
-    
+
     # 2. 初始化引擎
     proc.initialize()  # 加载 DiffusionEngine
-    
+
     # 3. 发送 READY 握手
     handshake_socket.send(msgspec.msgpack.encode({"status": "READY"}))
-    
+
     # 4. 运行异步事件循环
     asyncio.run(proc.run_loop(request_address, response_address))
 ```
@@ -565,22 +565,22 @@ async def run_loop(self, request_address, response_address):
     # 创建 ZMQ sockets
     request_socket = ctx.socket(zmq.PULL)  # 接收请求
     response_socket = ctx.socket(zmq.PUSH)  # 发送响应
-    
+
     while True:
         raw = await request_socket.recv()
         msg = decoder.decode(raw)
-        
+
         if msg["type"] == "add_request":
             # 派发到线程池
             task = asyncio.create_task(_dispatch_request(...))
-            
+
         elif msg["type"] == "abort":
             self._engine.abort(msg["request_ids"])
-            
+
         elif msg["type"] == "collective_rpc":
             result = await self._handle_collective_rpc(...)
             await response_socket.send(encoder.encode({"type": "rpc_result", ...}))
-            
+
         elif msg["type"] == "shutdown":
             break
 ```
@@ -602,17 +602,17 @@ async def run_loop(self, request_address, response_address):
 class DiffusionEngine:
     # 配置
     od_config: OmniDiffusionConfig
-    
+
     # 后处理函数
     post_process_func: Callable
     pre_process_func: Callable
-    
+
     # 执行器
     executor: DiffusionExecutor  # MultiprocDiffusionExecutor
-    
+
     # 调度器
     scheduler: SchedulerInterface  # RequestScheduler 或 StepScheduler
-    
+
     # 执行模式
     step_execution: bool  # True: StepScheduler, False: RequestScheduler
 ```
@@ -623,13 +623,13 @@ def step(self, request: OmniDiffusionRequest) -> list[OmniRequestOutput]:
     # 1. 预处理
     if self.pre_process_func:
         request = self.pre_process_func(request)
-    
+
     # 2. 调度并执行
     output = self.add_req_and_wait_for_response(request)
-    
+
     # 3. 后处理
     outputs = self.post_process_func(output.output) if self.post_process_func else output.output
-    
+
     return [OmniRequestOutput.from_diffusion(...)]
 ```
 
@@ -709,10 +709,10 @@ class OmniARScheduler:
     active_kv_transfers: set[str]
     pending_stop_after_extraction: set[str]
     transfer_triggered_requests: set[str]
-    
+
     # KV 传输条件
     kv_transfer_criteria: dict  # {"type": "prefill_finished" | "special_token", ...}
-    
+
     # Chunk 传输适配器 (async_chunk 模式)
     chunk_transfer_adapter: OmniChunkTransferAdapter | None
 ```
@@ -723,13 +723,13 @@ def schedule(self) -> SchedulerOutput:
     # 1. 处理待处理的 chunks
     if self.chunk_transfer_adapter:
         self.chunk_transfer_adapter.process_pending_chunks(self.waiting, self.running)
-    
+
     # 2. 调用基类调度
     scheduler_output = super().schedule()
-    
+
     # 3. 丰富输出为 OmniSchedulerOutput
     # ...
-    
+
 def update_from_output(self, scheduler_output, model_runner_output) -> tuple:
     # 1. 调用基类更新
     # 2. 处理 KV 传输触发
@@ -756,14 +756,14 @@ def update_from_output(self, scheduler_output, model_runner_output) -> tuple:
 ```python
 class MultiprocDiffusionExecutor(DiffusionExecutor):
     uses_multiproc: bool = True
-    
+
     # 通信
     _broadcast_mq: MessageQueue    # 广播到所有 workers
     _result_mq: MessageQueue       # 仅 rank-0 发送结果
-    
+
     # 进程
     _processes: list[mp.Process]
-    
+
     def _launch_workers(self, broadcast_handle, wake_events):
         for i in range(num_gpus):
             process = mp.Process(
@@ -790,13 +790,13 @@ class DiffusionWorker:
     rank: int
     device: torch.device
     vllm_config: VllmConfig
-    
+
     # 模型运行器
     model_runner: DiffusionModelRunner
-    
+
     # LoRA 管理
     lora_manager: DiffusionLoRAManager | None
-    
+
     # 性能分析
     profiler: WorkerProfiler | None
 ```
@@ -805,27 +805,27 @@ class DiffusionWorker:
 ```python
 class WorkerProc:
     """在独立进程中运行 Worker 的包装器"""
-    
+
     od_config: OmniDiffusionConfig
     gpu_id: int
-    
+
     # IPC
     context: zmq.Context
     mq: MessageQueue              # 从主进程接收
     result_mq: MessageQueue       # 发送结果（仅 rank-0）
-    
+
     # Worker 实例
     worker: DiffusionWorker
-    
+
     def worker_busy_loop(self):
         while self._running:
             msg = self.mq.dequeue(timeout=1.0)
-            
+
             if msg["type"] == "rpc":
                 result, should_reply = self.execute_rpc(msg)
                 if should_reply:
                     self.return_result(result)
-                    
+
             elif msg["type"] == "sleep":
                 ack = self.worker.handle_sleep_task(task)
                 self.return_result(ack)
@@ -852,16 +852,16 @@ class DiffusionModelRunner:
     vllm_config: VllmConfig
     od_config: OmniDiffusionConfig
     device: torch.device
-    
+
     # 模型
     pipeline: Any  # diffusers pipeline
-    
+
     # 缓存
     cache_backend: CacheBackend | None
-    
+
     # Offloading
     offload_backend: OffloadBackend | None
-    
+
     # KV 传输
     kv_transfer_manager: OmniKVTransferManager
 ```
@@ -881,14 +881,14 @@ class DiffusionModelRunner:
 class OmniRequestState(RequestState):
     # 多模态输出累积
     mm_accumulated: dict[str, Any]
-    
+
     def add_multimodal_tensor(self, payload, mm_type) -> None
     def _consolidate_multimodal_tensors(self) -> None
     def make_request_output(...) -> OmniRequestOutput | None
 
 class MultimodalOutputProcessor(VLLMOutputProcessor):
     engine_core_output_type: str | None  # "image", "audio", "latent"
-    
+
     def add_request(self, request, prompt, ...) -> None
     def process_outputs(self, engine_core_outputs, ...) -> OutputProcessorOutput
 ```
@@ -927,7 +927,7 @@ class KVCacheTransferData:
     layer_blocks: dict[str, Any]  # key_cache, value_cache
     block_ids: list[int]
     metadata: dict[str, Any]
-    
+
     def to_bytes(self) -> bytes
     def to_gpu_tensor(self) -> torch.Tensor
     @staticmethod
@@ -953,14 +953,14 @@ class OmniConnectorModelRunnerMixin:
     # Connector
     _omni_connector: OmniConnectorBase | None
     _kv_transfer_manager: OmniKVTransferManager | None
-    
+
     # 异步 I/O 状态
     _pending_load_reqs: dict[str, Any]
     _pending_save_reqs: dict[str, deque]
-    
+
     # 本地缓存
     _local_stage_payload_cache: dict[str, dict]
-    
+
     # 后台线程
     _recv_thread: threading.Thread
     _save_thread: threading.Thread
@@ -991,7 +991,7 @@ class OmniMasterServer:
                 input_bind_address=...,
                 output_bind_address=...,
             )
-    
+
     def register_stage_config(self, stage_id, stage_config, coordinator_addresses) -> None
     def get_stage_config(self, stage_id, timeout_s) -> Any
     def get_zmq_addresses(self, stage_id) -> StageAllocation
@@ -1439,14 +1439,14 @@ engine = AsyncOmniEngine(model, engine_args, ...)
 __init__():
     # 解析配置
     config_path, stage_configs = _resolve_stage_configs(model, kwargs)
-    
+
     # 启动 Orchestrator 线程
     self.orchestrator_thread = threading.Thread(
         target=self._bootstrap_orchestrator,
         args=(stage_init_timeout, startup_future),
     )
     self.orchestrator_thread.start()
-    
+
     # 等待就绪
     self._wait_for_orchestrator_init(startup_future, startup_timeout)
 
@@ -1473,16 +1473,16 @@ def _bootstrap_orchestrator(stage_init_timeout, startup_future):
     # 1. 创建 asyncio 事件循环
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
+
     # 2. 初始化 janus 队列
     self._initialize_janus_queues()
-    
+
     # 3. 初始化阶段
     self._initialize_stages(stage_init_timeout)
     # - 启动 LLM 子进程
     # - 启动 Diffusion 子进程
     # - 创建 StageClients
-    
+
     # 4. 创建 Orchestrator
     orchestrator = Orchestrator(
         request_async_queue=self.request_queue.async_q,
@@ -1490,13 +1490,13 @@ def _bootstrap_orchestrator(stage_init_timeout, startup_future):
         stage_clients=self.stage_clients,
         ...
     )
-    
+
     # 5. 发送就绪信号
     startup_future.set_result(loop)
-    
+
     # 6. 运行事件循环
     loop.run_until_complete(orchestrator.run())
-    
+
     # 7. 清理
     # - 取消待处理任务
     # - 关闭异步生成器
@@ -1510,31 +1510,31 @@ def _bootstrap_orchestrator(stage_init_timeout, startup_future):
 def spawn_stage_core(vllm_config, executor_class, ...):
     # 1. 分配地址
     addresses = get_engine_zmq_addresses(vllm_config)
-    
+
     # 2. 创建子进程
     proc = mp.Process(target=StageEngineCoreProc.run_stage_core, ...)
     proc.start()
-    
+
     return addresses, proc, handshake_address
 
 # 子进程入口
 def run_stage_core(vllm_config, ...):
     # 3. 创建 EngineCore
     engine_core = StageEngineCoreProc(vllm_config, ...)
-    
+
     # 4. HELLO 握手
     handshake_socket.send(msgspec.msgpack.encode({"status": "HELLO"}))
-    
+
     # 5. 接收 INIT
     init_payload = handshake_socket.recv()
     # 设置 ZMQ 地址
-    
+
     # 6. READY 握手
     handshake_socket.send(msgspec.msgpack.encode({
         "status": "READY",
         "num_gpu_blocks": num_gpu_blocks,
     }))
-    
+
     # 7. 运行忙循环
     engine_core.run_busy_loop()
     while True:
@@ -1554,7 +1554,7 @@ def run_stage_core(vllm_config, ...):
 def worker_main(rank, od_config, pipe_writer, broadcast_handle, ...):
     # 1. 创建 WorkerProc
     worker_proc = WorkerProc(od_config, gpu_id=rank, ...)
-    
+
     # 2. 创建 DiffusionWorker
     worker = DiffusionWorker(
         local_rank=rank,
@@ -1564,13 +1564,13 @@ def worker_main(rank, od_config, pipe_writer, broadcast_handle, ...):
     # - init_device()
     # - DiffusionModelRunner 加载模型
     # - DiffusionLoRAManager 初始化
-    
+
     # 3. 发送就绪信号
     pipe_writer.send({
         "status": "ready",
         "result_handle": result_mq_handle,
     })
-    
+
     # 4. 运行忙循环
     worker_proc.worker_busy_loop()
     while _running:
@@ -1591,7 +1591,7 @@ vLLM-Omni 通过以下设计实现了多阶段全方位模型的高效服务：
 
 1. **进程隔离**: 每个 LLM/Diffusion 阶段运行在独立子进程中，避免 GIL 竞争，支持独立 GPU 设备分配
 
-2. **分层调度**: 
+2. **分层调度**:
    - Orchestrator 层：跨阶段协调
    - Scheduler 层：每阶段内部调度（OmniARScheduler / DiffusionScheduler）
 
