@@ -57,8 +57,12 @@ class OvisImageSwiGLU(nn.Module):
         self.gate_fn = nn.SiLU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # -----my_log_other----- OvisImageSwiGLU forward
+        logger.info(f"-----my_log_other----- [OvisImageSwiGLU] input shape: {x.shape}")
         x1, x2 = x.chunk(2, dim=-1)
-        return self.gate_fn(x1) * x2
+        output = self.gate_fn(x1) * x2
+        logger.info(f"-----my_log_other----- [OvisImageSwiGLU] output shape: {output.shape}")
+        return output
 
 
 class OvisImageFeedForward(nn.Module):
@@ -80,10 +84,13 @@ class OvisImageFeedForward(nn.Module):
         quant_config: "QuantizationConfig | None" = None,
         prefix: str = "",
     ):
+        # -----my_log_other----- OvisImageFeedForward __init__
+        logger.info(f"-----my_log_other----- [OvisImageFeedForward.__init__] dim={dim}, dim_out={dim_out}, mult={mult}")
         super().__init__()
         if inner_dim is None:
             inner_dim = int(dim * mult)
         dim_out = dim_out or dim
+        logger.info(f"-----my_log_other----- [OvisImageFeedForward.__init__] inner_dim={inner_dim}, dim_out={dim_out}")
 
         self.linear_in = MergedColumnParallelLinear(
             dim,
@@ -105,9 +112,13 @@ class OvisImageFeedForward(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # -----my_log_other----- OvisImageFeedForward forward
+        logger.info(f"-----my_log_other----- [OvisImageFeedForward] input shape: {x.shape}")
         x = self.linear_in(x)
         x = self.act_fn(x)
-        return self.linear_out(x)
+        output = self.linear_out(x)
+        logger.info(f"-----my_log_other----- [OvisImageFeedForward] output shape: {output[0].shape if isinstance(output, tuple) else output.shape}")
+        return output
 
 
 class OvisImageAttention(nn.Module):
@@ -128,6 +139,9 @@ class OvisImageAttention(nn.Module):
         quant_config: "QuantizationConfig | None" = None,
         prefix: str = "",
     ):
+        # -----my_log_other----- OvisImageAttention __init__
+        logger.info(f"-----my_log_other----- [OvisImageAttention.__init__] query_dim={query_dim}, heads={heads}, dim_head={dim_head}")
+        logger.info(f"-----my_log_other----- [OvisImageAttention.__init__] added_kv_proj_dim={added_kv_proj_dim}, pre_only={pre_only}")
         super().__init__()
 
         self.head_dim = dim_head
@@ -208,6 +222,11 @@ class OvisImageAttention(nn.Module):
         image_rotary_emb: torch.Tensor | None = None,
         **kwargs,
     ) -> torch.Tensor:
+        # -----my_log_other----- OvisImageAttention forward
+        logger.info(f"-----my_log_other----- [OvisImageAttention] hidden_states shape: {hidden_states.shape}")
+        if encoder_hidden_states is not None:
+            logger.info(f"-----my_log_other----- [OvisImageAttention] encoder_hidden_states shape: {encoder_hidden_states.shape}")
+
         # Ensure contiguous for FP8 quantized linear layers
         hidden_states = hidden_states.contiguous()
         qkv, _ = self.to_qkv(hidden_states)
@@ -215,6 +234,7 @@ class OvisImageAttention(nn.Module):
         q_size = self.query_num_heads * self.head_dim
         kv_size = self.kv_num_heads * self.head_dim
         query, key, value = qkv.split([q_size, kv_size, kv_size], dim=-1)
+        logger.info(f"-----my_log_other----- [OvisImageAttention] query shape: {query.shape}, key shape: {key.shape}, value shape: {value.shape}")
 
         query = query.unflatten(-1, (self.query_num_heads, -1))
         key = key.unflatten(-1, (self.kv_num_heads, -1))
@@ -224,6 +244,7 @@ class OvisImageAttention(nn.Module):
         key = self.norm_k(key)
 
         if self.added_kv_proj_dim is not None:
+            logger.info("-----my_log_other----- [OvisImageAttention] Processing encoder_hidden_states with added_kv_proj")
             encoder_hidden_states = encoder_hidden_states.contiguous()
             encoder_qkv, _ = self.add_kv_proj(encoder_hidden_states)
             add_q_size = self.add_kv_proj.num_heads * self.head_dim
@@ -242,6 +263,7 @@ class OvisImageAttention(nn.Module):
             query = torch.cat([encoder_query, query], dim=1)
             key = torch.cat([encoder_key, key], dim=1)
             value = torch.cat([encoder_value, value], dim=1)
+            logger.info(f"-----my_log_other----- [OvisImageAttention] after cat, query shape: {query.shape}")
 
         if image_rotary_emb is not None:
             cos, sin = image_rotary_emb  # [S, D/2]
@@ -255,6 +277,7 @@ class OvisImageAttention(nn.Module):
             key,
             value,
         )
+        logger.info(f"-----my_log_other----- [OvisImageAttention] after attn, hidden_states shape: {hidden_states.shape}")
         hidden_states = hidden_states.flatten(2, 3)
         hidden_states = hidden_states.to(query.dtype)
 
@@ -266,11 +289,13 @@ class OvisImageAttention(nn.Module):
             hidden_states = self.to_out[0](hidden_states.contiguous())
             hidden_states = self.to_out[1](hidden_states)
             encoder_hidden_states = self.to_add_out(encoder_hidden_states.contiguous())
+            logger.info(f"-----my_log_other----- [OvisImageAttention] output hidden_states shape: {hidden_states.shape}, encoder_hidden_states shape: {encoder_hidden_states.shape}")
 
             return hidden_states, encoder_hidden_states
         else:
             if get_tensor_model_parallel_world_size() > 1:
                 hidden_states = tensor_model_parallel_all_gather(hidden_states, dim=-1)
+            logger.info(f"-----my_log_other----- [OvisImageAttention] output hidden_states shape: {hidden_states.shape}")
             return hidden_states
 
 
@@ -284,8 +309,11 @@ class OvisImageSingleTransformerBlock(nn.Module):
         quant_config: "QuantizationConfig | None" = None,
         prefix: str = "",
     ):
+        # -----my_log_other----- OvisImageSingleTransformerBlock __init__
+        logger.info(f"-----my_log_other----- [OvisImageSingleTransformerBlock.__init__] dim={dim}, num_attention_heads={num_attention_heads}")
         super().__init__()
         self.mlp_hidden_dim = int(dim * mlp_ratio)
+        logger.info(f"-----my_log_other----- [OvisImageSingleTransformerBlock.__init__] mlp_hidden_dim={self.mlp_hidden_dim}")
 
         # AdaLayerNorm modulation layer keeps full precision
         self.norm = AdaLayerNormZeroSingle(dim, quant_config=None, prefix=f"{prefix}.norm")
@@ -327,11 +355,16 @@ class OvisImageSingleTransformerBlock(nn.Module):
         image_rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
         joint_attention_kwargs: dict[str, Any] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        # -----my_log_other----- OvisImageSingleTransformerBlock forward
+        logger.info(f"-----my_log_other----- [OvisImageSingleTransformerBlock] hidden_states shape: {hidden_states.shape}, encoder_hidden_states shape: {encoder_hidden_states.shape}")
         text_seq_len = encoder_hidden_states.shape[1]
         hidden_states = torch.cat([encoder_hidden_states, hidden_states], dim=1)
+        logger.info(f"-----my_log_other----- [OvisImageSingleTransformerBlock] after cat, hidden_states shape: {hidden_states.shape}")
 
         residual = hidden_states
         norm_hidden_states, gate = self.norm(hidden_states, emb=temb)
+        logger.info(f"-----my_log_other----- [OvisImageSingleTransformerBlock] norm_hidden_states shape: {norm_hidden_states.shape}, gate shape: {gate.shape}")
+
         mlp_output, _ = self.proj_mlp(norm_hidden_states)
         mlp_hidden_states, mlp_hidden_gate = mlp_output.split(
             [self.mlp_hidden_dim, self.mlp_hidden_dim], dim=-1
@@ -353,6 +386,7 @@ class OvisImageSingleTransformerBlock(nn.Module):
             hidden_states = hidden_states.clip(-65504, 65504)
 
         encoder_hidden_states, hidden_states = hidden_states[:, :text_seq_len], hidden_states[:, text_seq_len:]
+        logger.info(f"-----my_log_other----- [OvisImageSingleTransformerBlock] output hidden_states shape: {hidden_states.shape}, encoder_hidden_states shape: {encoder_hidden_states.shape}")
         return encoder_hidden_states, hidden_states
 
 
@@ -367,6 +401,8 @@ class OvisImageTransformerBlock(nn.Module):
         quant_config: "QuantizationConfig | None" = None,
         prefix: str = "",
     ):
+        # -----my_log_other----- OvisImageTransformerBlock __init__
+        logger.info(f"-----my_log_other----- [OvisImageTransformerBlock.__init__] dim={dim}, num_attention_heads={num_attention_heads}")
         super().__init__()
 
         # Dual-stream block keeps full precision (FP8 causes output noise)
@@ -401,6 +437,7 @@ class OvisImageTransformerBlock(nn.Module):
             quant_config=None,  # Dual-stream block keeps full precision
             prefix=f"{prefix}.ff_context",
         )
+        logger.info("-----my_log_other----- [OvisImageTransformerBlock.__init__] done")
 
     def forward(
         self,
@@ -410,6 +447,8 @@ class OvisImageTransformerBlock(nn.Module):
         image_rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
         joint_attention_kwargs: dict[str, Any] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        # -----my_log_other----- OvisImageTransformerBlock forward
+        logger.info(f"-----my_log_other----- [OvisImageTransformerBlock] hidden_states shape: {hidden_states.shape}, encoder_hidden_states shape: {encoder_hidden_states.shape}")
         norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(hidden_states, emb=temb)
         norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp = self.norm1_context(
             encoder_hidden_states, emb=temb
@@ -417,6 +456,7 @@ class OvisImageTransformerBlock(nn.Module):
         joint_attention_kwargs = joint_attention_kwargs or {}
 
         # Attention.
+        logger.info("-----my_log_other----- [OvisImageTransformerBlock] Running attention...")
         attention_outputs = self.attn(
             hidden_states=norm_hidden_states,
             encoder_hidden_states=norm_encoder_hidden_states,
@@ -455,16 +495,21 @@ class OvisImageTransformerBlock(nn.Module):
         if encoder_hidden_states.dtype == torch.float16:
             encoder_hidden_states = encoder_hidden_states.clip(-65504, 65504)
 
+        logger.info(f"-----my_log_other----- [OvisImageTransformerBlock] output hidden_states shape: {hidden_states.shape}, encoder_hidden_states shape: {encoder_hidden_states.shape}")
         return encoder_hidden_states, hidden_states
 
 
 class OvisImagePosEmbed(nn.Module):
     def __init__(self, theta: int, axes_dim: list[int]):
+        # -----my_log_other----- OvisImagePosEmbed __init__
+        logger.info(f"-----my_log_other----- [OvisImagePosEmbed.__init__] theta={theta}, axes_dim={axes_dim}")
         super().__init__()
         self.theta = theta
         self.axes_dim = axes_dim
 
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
+        # -----my_log_other----- OvisImagePosEmbed forward
+        logger.info(f"-----my_log_other----- [OvisImagePosEmbed] ids shape: {ids.shape}")
         n_axes = ids.shape[-1]
         cos_out = []
         sin_out = []
@@ -484,6 +529,7 @@ class OvisImagePosEmbed(nn.Module):
             sin_out.append(freqs_cis.imag)
         freqs_cos = torch.cat(cos_out, dim=-1).to(ids.device)
         freqs_sin = torch.cat(sin_out, dim=-1).to(ids.device)
+        logger.info(f"-----my_log_other----- [OvisImagePosEmbed] freqs_cos shape: {freqs_cos.shape}, freqs_sin shape: {freqs_sin.shape}")
         return freqs_cos, freqs_sin
 
 
@@ -532,12 +578,21 @@ class OvisImageTransformer2DModel(nn.Module):
         axes_dims_rope: tuple[int] = (16, 56, 56),
         quant_config: "QuantizationConfig | None" = None,
     ):
+        # -----my_log_other----- OvisImageTransformer2DModel __init__
+        logger.info("-----my_log_other----- [OvisImageTransformer2DModel.__init__] entry")
+        logger.info(f"-----my_log_other----- [OvisImageTransformer2DModel.__init__] patch_size={patch_size}, in_channels={in_channels}, out_channels={out_channels}")
+        logger.info(f"-----my_log_other----- [OvisImageTransformer2DModel.__init__] num_layers={num_layers}, num_single_layers={num_single_layers}")
+        logger.info(f"-----my_log_other----- [OvisImageTransformer2DModel.__init__] attention_head_dim={attention_head_dim}, num_attention_heads={num_attention_heads}")
         super().__init__()
         model_config = od_config.tf_model_config
         num_layers = model_config.num_layers
+        logger.info(f"-----my_log_other----- [OvisImageTransformer2DModel.__init__] num_layers from config: {num_layers}")
+
         self.in_channels = in_channels
         self.out_channels = out_channels or in_channels
         self.inner_dim = num_attention_heads * attention_head_dim
+        logger.info(f"-----my_log_other----- [OvisImageTransformer2DModel.__init__] inner_dim={self.inner_dim}")
+
         self.pos_embed = OvisImagePosEmbed(theta=10000, axes_dim=axes_dims_rope)
 
         self.time_proj = Timesteps(num_channels=256, flip_sin_to_cos=True, downscale_freq_shift=0)
@@ -550,6 +605,7 @@ class OvisImageTransformer2DModel(nn.Module):
 
         # Dual-stream blocks: quant_config=None to keep full precision
         # (FP8 in joint attention path causes output noise)
+        logger.info(f"-----my_log_other----- [OvisImageTransformer2DModel.__init__] Creating {num_layers} OvisImageTransformerBlock...")
         self.transformer_blocks = nn.ModuleList(
             [
                 OvisImageTransformerBlock(
@@ -564,6 +620,7 @@ class OvisImageTransformer2DModel(nn.Module):
         )
 
         # Single-stream blocks: support quantization
+        logger.info(f"-----my_log_other----- [OvisImageTransformer2DModel.__init__] Creating {num_single_layers} OvisImageSingleTransformerBlock...")
         self.single_transformer_blocks = nn.ModuleList(
             [
                 OvisImageSingleTransformerBlock(
@@ -586,6 +643,7 @@ class OvisImageTransformer2DModel(nn.Module):
             prefix="norm_out",
         )
         self.proj_out = nn.Linear(self.inner_dim, patch_size * patch_size * self.out_channels, bias=True)
+        logger.info("-----my_log_other----- [OvisImageTransformer2DModel.__init__] done")
 
     def forward(
         self,
@@ -596,6 +654,12 @@ class OvisImageTransformer2DModel(nn.Module):
         txt_ids: torch.Tensor = None,
         return_dict: bool = True,
     ) -> torch.Tensor | Transformer2DModelOutput:
+        # -----my_log----- Transformer forward entry
+        logger.info("-----my_log----- [Transformer] forward() entry")
+        logger.info(f"-----my_log----- [Transformer] hidden_states shape: {hidden_states.shape}, dtype: {hidden_states.dtype}")
+        if encoder_hidden_states is not None:
+            logger.info(f"-----my_log----- [Transformer] encoder_hidden_states shape: {encoder_hidden_states.shape}")
+        logger.info(f"-----my_log----- [Transformer] timestep: {timestep}, img_ids shape: {img_ids.shape}, txt_ids shape: {txt_ids.shape}")
         """
         The [`OvisImageTransformer2DModel`] forward method.
 
@@ -620,13 +684,17 @@ class OvisImageTransformer2DModel(nn.Module):
         """
 
         hidden_states = self.x_embedder(hidden_states)
+        logger.info(f"-----my_log----- [Transformer] after x_embedder, hidden_states shape: {hidden_states.shape}")
+
         timestep = timestep.to(device=hidden_states.device, dtype=hidden_states.dtype) * 1000
 
         timesteps_proj = self.time_proj(timestep)
         temb = self.timestep_embedder(timesteps_proj.to(device=hidden_states.device, dtype=hidden_states.dtype))
+        logger.info(f"-----my_log----- [Transformer] temb (time embedding) shape: {temb.shape}")
 
         encoder_hidden_states = self.context_embedder_norm(encoder_hidden_states)
         encoder_hidden_states = self.context_embedder(encoder_hidden_states)
+        logger.info(f"-----my_log----- [Transformer] after context_embedder, encoder_hidden_states shape: {encoder_hidden_states.shape}")
         if txt_ids.ndim == 3:
             logger.warning(
                 "Passing `txt_ids` 3d torch.Tensor is deprecated."
@@ -641,12 +709,17 @@ class OvisImageTransformer2DModel(nn.Module):
             img_ids = img_ids[0]
 
         ids = torch.cat((txt_ids, img_ids), dim=0)
+        logger.info(f"-----my_log----- [Transformer] ids (pos ids) shape: {ids.shape}")
+
         if is_torch_npu_available():
             freqs_cos, freqs_sin = self.pos_embed(ids.cpu())
             image_rotary_emb = (freqs_cos.npu(), freqs_sin.npu())
         else:
             image_rotary_emb = self.pos_embed(ids)
+        logger.info(f"-----my_log----- [Transformer] image_rotary_emb cos shape: {image_rotary_emb[0].shape}, sin shape: {image_rotary_emb[1].shape}")
 
+        # -----my_log----- Dual-stream transformer blocks
+        logger.info(f"-----my_log----- [Transformer] Starting {len(self.transformer_blocks)} dual-stream transformer blocks")
         for index_block, block in enumerate(self.transformer_blocks):
             encoder_hidden_states, hidden_states = block(
                 hidden_states=hidden_states,
@@ -655,6 +728,10 @@ class OvisImageTransformer2DModel(nn.Module):
                 image_rotary_emb=image_rotary_emb,
             )
 
+        logger.info(f"-----my_log----- [Transformer] After dual-stream blocks, hidden_states shape: {hidden_states.shape}, encoder_hidden_states shape: {encoder_hidden_states.shape}")
+
+        # -----my_log----- Single-stream transformer blocks
+        logger.info(f"-----my_log----- [Transformer] Starting {len(self.single_transformer_blocks)} single-stream transformer blocks")
         for index_block, block in enumerate(self.single_transformer_blocks):
             encoder_hidden_states, hidden_states = block(
                 hidden_states=hidden_states,
@@ -663,8 +740,13 @@ class OvisImageTransformer2DModel(nn.Module):
                 image_rotary_emb=image_rotary_emb,
             )
 
+        logger.info(f"-----my_log----- [Transformer] After single-stream blocks, hidden_states shape: {hidden_states.shape}")
+
         hidden_states = self.norm_out(hidden_states, temb)
+        logger.info(f"-----my_log----- [Transformer] after norm_out, hidden_states shape: {hidden_states.shape}")
+
         output = self.proj_out(hidden_states)
+        logger.info(f"-----my_log----- [Transformer] output shape: {output.shape}")
 
         if not return_dict:
             return (output,)
