@@ -175,8 +175,10 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
 
         # ===== DEBUG LOGGING FOR text_encoder =====
         logger.warning(f"----my_debug--- [OvisImagePipeline] Loading text_encoder...")
+        logger.warning(f"----my_debug--- [OvisImagePipeline] Will use torch_dtype={od_config.dtype} for text_encoder")
         self.text_encoder = Qwen3Model.from_pretrained(
-            model, subfolder="text_encoder", local_files_only=local_files_only
+            model, subfolder="text_encoder", local_files_only=local_files_only,
+            torch_dtype=od_config.dtype  # 使用 od_config 的 dtype，确保与其他组件一致
         )
         logger.warning(f"----my_debug--- [OvisImagePipeline] text_encoder loaded, dtype={self.text_encoder.dtype}")
         logger.warning(f"----my_debug--- [OvisImagePipeline] text_encoder device={next(self.text_encoder.parameters()).device if hasattr(self.text_encoder, 'parameters') else 'N/A'}")
