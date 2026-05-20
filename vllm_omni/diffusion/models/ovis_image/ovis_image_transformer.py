@@ -381,12 +381,25 @@ class OvisImageTransformer2DModel(nn.Module):
         joint_attention_dim: int = 2048,
         axes_dims_rope: tuple[int] = (16, 56, 56),
     ):
+        # ===== DEBUG LOGGING FOR TRANSFORMER INIT =====
+        logger.warning(f"----my_debug--- [OvisImageTransformer2DModel.__init__] START")
+        logger.warning(f"----my_debug--- [Transformer] od_config.dtype={od_config.dtype}")
+        logger.warning(f"----my_debug--- [Transformer] od_config.quantization_config={od_config.quantization_config}")
+        logger.warning(f"----my_debug--- [Transformer] in_channels={in_channels}, out_channels={out_channels}, patch_size={patch_size}")
+        logger.warning(f"----my_debug--- [Transformer] num_layers={num_layers}, num_single_layers={num_single_layers}")
+        logger.warning(f"----my_debug--- [Transformer] num_attention_heads={num_attention_heads}, attention_head_dim={attention_head_dim}")
+        # ===== END DEBUG LOGGING =====
+
         super().__init__()
         model_config = od_config.tf_model_config
         num_layers = model_config.num_layers
         self.in_channels = in_channels
         self.out_channels = out_channels or in_channels
         self.inner_dim = num_attention_heads * attention_head_dim
+
+        logger.warning(f"----my_debug--- [Transformer] inner_dim={self.inner_dim} (={num_attention_heads} * {attention_head_dim})")
+        logger.warning(f"----my_debug--- [Transformer] num_layers from tf_model_config: {num_layers}")
+
         self.pos_embed = OvisImagePosEmbed(theta=10000, axes_dim=axes_dims_rope)
 
         self.time_proj = Timesteps(num_channels=256, flip_sin_to_cos=True, downscale_freq_shift=0)
@@ -394,7 +407,13 @@ class OvisImageTransformer2DModel(nn.Module):
 
         self.context_embedder_norm = RMSNorm(joint_attention_dim, eps=1e-6)
         self.context_embedder = nn.Linear(joint_attention_dim, self.inner_dim)
+
+        # ===== DEBUG LOGGING FOR x_embedder CREATION =====
+        logger.warning(f"----my_debug--- [Transformer] Creating x_embedder: nn.Linear(in_channels={in_channels}, out_features={self.inner_dim})")
         self.x_embedder = nn.Linear(in_channels, self.inner_dim)
+        logger.warning(f"----my_debug--- [Transformer] x_embedder created, weight.dtype={self.x_embedder.weight.dtype}")
+        logger.warning(f"----my_debug--- [Transformer] x_embedder.weight.shape={self.x_embedder.weight.shape}")
+        # ===== END DEBUG LOGGING =====
 
         self.transformer_blocks = nn.ModuleList(
             [
@@ -452,7 +471,29 @@ class OvisImageTransformer2DModel(nn.Module):
             `tuple` where the first element is the sample tensor.
         """
 
-        hidden_states = self.x_embedder(hidden_states)
+        # ===== DEBUG LOGGING FOR x_embedder =====
+        logger.warning(f"----my_debug--- ===== x_embedder forward START =====")
+        logger.warning(f"----my_debug--- [INPUT hidden_states] shape={hidden_states.shape}, dtype={hidden_states.dtype}, device={hidden_states.device}")
+        logger.warning(f"----my_debug--- [x_embedder.weight] shape={self.x_embedder.weight.shape}, dtype={self.x_embedder.weight.dtype}, device={self.x_embedder.weight.device}")
+        if self.x_embedder.bias is not None:
+            logger.warning(f"----my_debug--- [x_embedder.bias] shape={self.x_embedder.bias.shape}, dtype={self.x_embedder.bias.dtype}")
+
+        # Check for mismatch
+        input_last_dim = hidden_states.shape[-1]
+        weight_in_dim = self.x_embedder.weight.shape[1]
+        logger.warning(f"----my_debug--- [DIMENSION CHECK] input_last_dim={input_last_dim}, weight_in_features={weight_in_dim}, MATCH={input_last_dim == weight_in_dim}")
+        logger.warning(f"----my_debug--- [DTYPE CHECK] input_dtype={hidden_states.dtype}, weight_dtype={self.x_embedder.weight.dtype}, MATCH={hidden_states.dtype == self.x_embedder.weight.dtype}")
+        logger.warning(f"----my_debug--- [DEVICE CHECK] input_device={hidden_states.device}, weight_device={self.x_embedder.weight.device}, MATCH={hidden_states.device == self.x_embedder.weight.device}")
+        logger.warning(f"----my_debug--- ===== x_embedder forward END =====")
+        # ===== END DEBUG LOGGING =====
+
+        try:
+            hidden_states = self.x_embedder(hidden_states)
+        except Exception as e:
+            logger.warning(f"----my_debug--- ===== ERROR in x_embedder =====")
+            logger.warning(f"----my_debug--- Exception type: {type(e).__name__}")
+            logger.warning(f"----my_debug--- Exception message: {e}")
+            raise
         timestep = timestep.to(device=hidden_states.device, dtype=hidden_states.dtype) * 1000
 
         timesteps_proj = self.time_proj(timestep)

@@ -149,6 +149,12 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
         prefix: str = "",
     ):
         super().__init__()
+        # ===== DEBUG LOGGING FOR PIPELINE INIT =====
+        logger.warning(f"----my_debug--- [OvisImagePipeline.__init__] START")
+        logger.warning(f"----my_debug--- [OvisImagePipeline] od_config.dtype={od_config.dtype}, od_config.model={od_config.model}")
+        logger.warning(f"----my_debug--- [OvisImagePipeline] od_config.quantization_config={od_config.quantization_config}")
+        # ===== END DEBUG LOGGING =====
+
         self.od_config = od_config
         self.weights_sources = [
             DiffusersPipelineLoader.ComponentSource(
@@ -167,19 +173,34 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
             model, subfolder="scheduler", local_files_only=local_files_only
         )
 
+        # ===== DEBUG LOGGING FOR text_encoder =====
+        logger.warning(f"----my_debug--- [OvisImagePipeline] Loading text_encoder...")
         self.text_encoder = Qwen3Model.from_pretrained(
             model, subfolder="text_encoder", local_files_only=local_files_only
         )
+        logger.warning(f"----my_debug--- [OvisImagePipeline] text_encoder loaded, dtype={self.text_encoder.dtype}")
+        logger.warning(f"----my_debug--- [OvisImagePipeline] text_encoder device={next(self.text_encoder.parameters()).device if hasattr(self.text_encoder, 'parameters') else 'N/A'}")
+        # ===== END DEBUG LOGGING =====
 
         self.vae = AutoencoderKL.from_pretrained(model, subfolder="vae", local_files_only=local_files_only).to(
             self._execution_device
         )
+        logger.warning(f"----my_debug--- [OvisImagePipeline] vae loaded, dtype={self.vae.dtype if hasattr(self.vae, 'dtype') else 'N/A'}")
 
         self.tokenizer = Qwen2TokenizerFast.from_pretrained(
             model, subfolder="tokenizer", local_files_only=local_files_only
         )
 
+        # ===== DEBUG LOGGING FOR transformer =====
+        logger.warning(f"----my_debug--- [OvisImagePipeline] Creating OvisImageTransformer2DModel...")
         self.transformer = OvisImageTransformer2DModel(od_config=od_config)
+        logger.warning(f"----my_debug--- [OvisImagePipeline] transformer created, type={type(self.transformer).__name__}")
+        if hasattr(self.transformer, 'x_embedder') and hasattr(self.transformer.x_embedder, 'weight'):
+            logger.warning(f"----my_debug--- [OvisImagePipeline] transformer.x_embedder.weight dtype={self.transformer.x_embedder.weight.dtype}, device={self.transformer.x_embedder.weight.device}")
+        if hasattr(self.transformer, 'in_channels'):
+            logger.warning(f"----my_debug--- [OvisImagePipeline] transformer.in_channels={self.transformer.in_channels}, inner_dim={getattr(self.transformer, 'inner_dim', 'N/A')}")
+        logger.warning(f"----my_debug--- [OvisImagePipeline.__init__] END")
+        # ===== END DEBUG LOGGING =====
 
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
 
@@ -227,6 +248,14 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
     ):
         device = device or self._execution_device
         dtype = dtype or self.text_encoder.dtype
+
+        # ===== DEBUG LOGGING FOR PROMPT EMBEDS =====
+        logger.warning(f"----my_debug--- [pipeline._get_ovis_prompt_embeds] START")
+        logger.warning(f"----my_debug--- [pipeline] text_encoder.dtype={self.text_encoder.dtype}")
+        logger.warning(f"----my_debug--- [pipeline] text_encoder device={next(self.text_encoder.parameters()).device if hasattr(self.text_encoder, 'parameters') else 'N/A'}")
+        logger.warning(f"----my_debug--- [pipeline] target dtype={dtype}")
+        logger.warning(f"----my_debug--- [pipeline] transformer.x_embedder.weight dtype={self.transformer.x_embedder.weight.dtype if hasattr(self.transformer, 'x_embedder') else 'N/A'}")
+        # ===== END DEBUG LOGGING =====
 
         messages = self._get_messages(prompt)
 
@@ -695,6 +724,16 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
 
         # 4. Prepare latent variables
         num_channel_latents = self.transformer.in_channels // 4
+
+        # ===== DEBUG LOGGING FOR LATENTS =====
+        logger.warning(f"----my_debug--- [pipeline] prepare_latents START")
+        logger.warning(f"----my_debug--- [pipeline] prompt_embeds.dtype={prompt_embeds.dtype}, shape={prompt_embeds.shape}, device={prompt_embeds.device}")
+        logger.warning(f"----my_debug--- [pipeline] transformer.x_embedder.weight dtype={self.transformer.x_embedder.weight.dtype}, device={self.transformer.x_embedder.weight.device}")
+        logger.warning(f"----my_debug--- [pipeline] transformer.in_channels={self.transformer.in_channels}")
+        logger.warning(f"----my_debug--- [pipeline] num_channel_latents={num_channel_latents}")
+        logger.warning(f"----my_debug--- [pipeline] latents dtype will be={prompt_embeds.dtype}")
+        # ===== END DEBUG LOGGING =====
+
         latents, latent_image_ids = self.prepare_latents(
             batch_size=batch_size * num_images_per_prompt,
             num_channel_latents=num_channel_latents,
@@ -705,6 +744,8 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
             generator=generator,
             latents=latents,
         )
+
+        logger.warning(f"----my_debug--- [pipeline] latents prepared: dtype={latents.dtype}, shape={latents.shape}, device={latents.device}")
 
         # 5. Prepare timesteps
 

@@ -677,6 +677,9 @@ class OmniDiffusionConfig:
             )
 
         # Convert string dtype to torch.dtype if needed
+        logger.warning(f"----my_debug--- [OmniDiffusionConfig.__post_init__] START")
+        logger.warning(f"----my_debug--- [OmniDiffusionConfig] model={self.model}, model_class_name={self.model_class_name}")
+        logger.warning(f"----my_debug--- [OmniDiffusionConfig] dtype before conversion: {self.dtype} (type={type(self.dtype)})")
         if isinstance(self.dtype, str):
             dtype_map = {
                 "auto": torch.bfloat16,
@@ -695,6 +698,9 @@ class OmniDiffusionConfig:
             else:
                 logger.warning(f"Unknown dtype string '{self.dtype}', defaulting to bfloat16")
                 self.dtype = torch.bfloat16
+        logger.warning(f"----my_debug--- [OmniDiffusionConfig] dtype after conversion: {self.dtype}")
+        logger.warning(f"----my_debug--- [OmniDiffusionConfig] quantization_config={self.quantization_config}")
+        logger.warning(f"----my_debug--- [OmniDiffusionConfig.__post_init__] END")
 
         # Convert cache_config dict to DiffusionCacheConfig if needed
         if isinstance(self.cache_config, dict):
