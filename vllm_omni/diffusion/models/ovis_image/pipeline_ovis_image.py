@@ -253,6 +253,14 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
         device = device or self._execution_device
         dtype = dtype or self.text_encoder.dtype
 
+        # ===== DEBUG LOGGING FOR DTYPE =====
+        logger.warning("my_debug_dtype ===== _get_ovis_prompt_embeds START =====")
+        logger.warning(f"my_debug_dtype [text_encoder] type={type(self.text_encoder).__name__}, dtype={self.text_encoder.dtype}")
+        logger.warning(f"my_debug_dtype [text_encoder.device] {next(self.text_encoder.parameters()).device if hasattr(self.text_encoder, 'parameters') else 'N/A'}")
+        logger.warning(f"my_debug_dtype [target dtype] {dtype}")
+        logger.warning("my_debug_dtype ===== _get_ovis_prompt_embeds END =====")
+        # ===== END DEBUG LOGGING =====
+
         messages = self._get_messages(prompt)
 
         batch_size = len(messages)
@@ -769,6 +777,19 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
         # -----my_log----- Step 4: Prepare latents
         logger.info("-----my_log----- [Pipeline] Step 4: prepare_latents() starting")
         num_channel_latents = self.transformer.in_channels // 4
+
+        # ===== DEBUG LOGGING FOR DTYPE =====
+        logger.warning("my_debug_dtype ===== prepare_latents START =====")
+        logger.warning(f"my_debug_dtype [prompt_embeds] dtype={prompt_embeds.dtype}, shape={prompt_embeds.shape}, device={prompt_embeds.device}")
+        logger.warning(f"my_debug_dtype [transformer] type={type(self.transformer).__name__}")
+        if hasattr(self.transformer, 'x_embedder') and hasattr(self.transformer.x_embedder, 'weight'):
+            logger.warning(f"my_debug_dtype [transformer.x_embedder.weight] dtype={self.transformer.x_embedder.weight.dtype}, device={self.transformer.x_embedder.weight.device}")
+        logger.warning(f"my_debug_dtype [transformer.in_channels] {self.transformer.in_channels}")
+        logger.warning(f"my_debug_dtype [num_channel_latents] {num_channel_latents}")
+        logger.warning(f"my_debug_dtype [latents dtype will be] {prompt_embeds.dtype}")
+        logger.warning("my_debug_dtype ===== prepare_latents END =====")
+        # ===== END DEBUG LOGGING =====
+
         latents, latent_image_ids = self.prepare_latents(
             batch_size=batch_size * num_images_per_prompt,
             num_channel_latents=num_channel_latents,
@@ -779,6 +800,7 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
             generator=generator,
             latents=latents,
         )
+        logger.warning(f"my_debug_dtype [latents after prepare_latents] dtype={latents.dtype}, shape={latents.shape}, device={latents.device}")
         logger.info(f"-----my_log----- [Pipeline] latents shape: {latents.shape}, latent_image_ids shape: {latent_image_ids.shape}")
 
         # 5. Prepare timesteps

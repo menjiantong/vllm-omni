@@ -301,12 +301,24 @@ class DiffusersPipelineLoader:
         if load_format is None:
             load_format = "default"
         self.od_config = od_config
+
+        # ===== DEBUG LOGGING FOR MODEL LOADING =====
+        logger.warning("my_debug_dtype ===== load_model START =====")
+        logger.warning(f"my_debug_dtype [od_config] dtype={od_config.dtype}, model={od_config.model}, model_class_name={od_config.model_class_name}")
+        logger.warning(f"my_debug_dtype [od_config] quantization_config={od_config.quantization_config}")
+        logger.warning(f"my_debug_dtype [od_config] load_device={load_device}, load_format={load_format}")
+        if hasattr(od_config, 'tf_model_config') and od_config.tf_model_config is not None:
+            logger.warning(f"my_debug_dtype [od_config.tf_model_config] params={od_config.tf_model_config.params if hasattr(od_config.tf_model_config, 'params') else od_config.tf_model_config}")
+        # ===== END DEBUG LOGGING =====
+
         # CPU offload + FP8: load weights on device for FP8 quantization
         if load_device == "cpu" and od_config.quantization_config is not None:
             load_device = device.type
             logger.info(f"Quantization enabled with CPU offload, using {load_device} for weight loading")
 
         target_device = torch.device(load_device)
+        logger.warning(f"my_debug_dtype [load_model] set_default_torch_dtype to {od_config.dtype}")
+
         with set_default_torch_dtype(od_config.dtype):
             if od_config.parallel_config.use_hsdp:
                 model = self._load_model_with_hsdp(
@@ -316,16 +328,31 @@ class DiffusersPipelineLoader:
                 with target_device:
                     if load_format == "default":
                         model = initialize_model(od_config)
+                        logger.warning(f"my_debug_dtype [load_model] initialize_model returned, model type={type(model).__name__}")
                     elif load_format == "diffusers":
                         model = DiffusersAdapterPipeline(od_config=od_config, device=target_device)
+                        logger.warning(f"my_debug_dtype [load_model] DiffusersAdapterPipeline created, model type={type(model).__name__}")
                     elif load_format == "custom_pipeline":
                         from vllm_omni.diffusion.config import set_current_diffusion_config
 
                         model_cls = resolve_obj_by_qualname(custom_pipeline_name)
                         with set_current_diffusion_config(od_config):
                             model = model_cls(od_config=od_config)
+                        logger.warning(f"my_debug_dtype [load_model] custom_pipeline created, model type={type(model).__name__}")
                     else:
                         raise ValueError(f"Unknown load_format: {load_format}")
+
+                # Log model transformer info after initialization
+                if hasattr(model, 'transformer'):
+                    transformer = model.transformer
+                    logger.warning(f"my_debug_dtype [model.transformer] type={type(transformer).__name__}")
+                    if hasattr(transformer, 'x_embedder'):
+                        logger.warning(f"my_debug_dtype [model.transformer.x_embedder] type={type(transformer.x_embedder).__name__}")
+                        if hasattr(transformer.x_embedder, 'weight'):
+                            logger.warning(f"my_debug_dtype [model.transformer.x_embedder.weight] shape={transformer.x_embedder.weight.shape}, dtype={transformer.x_embedder.weight.dtype}")
+                    if hasattr(transformer, 'in_channels'):
+                        logger.warning(f"my_debug_dtype [model.transformer] in_channels={transformer.in_channels}, inner_dim={getattr(transformer, 'inner_dim', 'N/A')}")
+
                 logger.debug("Loading weights on %s ...", load_device)
                 if load_format == "diffusers":
                     # DiffusersAdapterPipeline.load_weights() calls
@@ -338,10 +365,19 @@ class DiffusersPipelineLoader:
                     # Quantization does not happen in `load_weights` but after it
                     self.load_weights(model)
 
+                # Log model info after weight loading
+                if hasattr(model, 'transformer') and hasattr(model.transformer, 'x_embedder'):
+                    logger.warning(f"my_debug_dtype [AFTER load_weights] model.transformer.x_embedder.weight dtype={model.transformer.x_embedder.weight.dtype}, device={model.transformer.x_embedder.weight.device}")
+
             # Process weights after loading for quantization (e.g., FP8 online quantization)
             # This is needed for vLLM's quantization methods that need to transform weights
             self._process_weights_after_loading(model, target_device)
 
+            # Log final model info
+            if hasattr(model, 'transformer') and hasattr(model.transformer, 'x_embedder'):
+                logger.warning(f"my_debug_dtype [AFTER process_weights] model.transformer.x_embedder.weight dtype={model.transformer.x_embedder.weight.dtype}, device={model.transformer.x_embedder.weight.device}")
+
+        logger.warning("my_debug_dtype ===== load_model END =====")
         return model.eval()
 
     def _process_weights_after_loading(self, model: nn.Module, target_device: torch.device) -> None:

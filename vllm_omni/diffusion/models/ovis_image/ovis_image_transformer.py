@@ -683,7 +683,40 @@ class OvisImageTransformer2DModel(nn.Module):
             `tuple` where the first element is the sample tensor.
         """
 
-        hidden_states = self.x_embedder(hidden_states)
+        # ===== DEBUG LOGGING FOR x_embedder =====
+        logger.warning("my_debug_dtype ===== x_embedder START =====")
+        logger.warning(f"my_debug_dtype [INPUT hidden_states] shape={hidden_states.shape}, dtype={hidden_states.dtype}, device={hidden_states.device}, requires_grad={hidden_states.requires_grad}")
+        logger.warning(f"my_debug_dtype [INPUT hidden_states] min={hidden_states.min().item():.6f}, max={hidden_states.max().item():.6f}, mean={hidden_states.mean().item():.6f}")
+
+        # x_embedder info
+        logger.warning(f"my_debug_dtype [x_embedder] type={type(self.x_embedder)}, module_class={self.x_embedder.__class__.__name__}")
+        logger.warning(f"my_debug_dtype [x_embedder.weight] shape={self.x_embedder.weight.shape}, dtype={self.x_embedder.weight.dtype}, device={self.x_embedder.weight.device}")
+        logger.warning(f"my_debug_dtype [x_embedder.weight] min={self.x_embedder.weight.min().item():.6f}, max={self.x_embedder.weight.max().item():.6f}, mean={self.x_embedder.weight.mean().item():.6f}")
+        if self.x_embedder.bias is not None:
+            logger.warning(f"my_debug_dtype [x_embedder.bias] shape={self.x_embedder.bias.shape}, dtype={self.x_embedder.bias.dtype}, device={self.x_embedder.bias.device}")
+
+        # Model config info
+        logger.warning(f"my_debug_dtype [Transformer CONFIG] in_channels={self.in_channels}, inner_dim={self.inner_dim}, out_channels={self.out_channels}")
+
+        # Check for mismatch
+        input_last_dim = hidden_states.shape[-1]
+        weight_in_dim = self.x_embedder.weight.shape[1]
+        logger.warning(f"my_debug_dtype [DIMENSION CHECK] input_last_dim={input_last_dim}, weight_in_features={weight_in_dim}, MATCH={input_last_dim == weight_in_dim}")
+        logger.warning(f"my_debug_dtype [DTYPE CHECK] input_dtype={hidden_states.dtype}, weight_dtype={self.x_embedder.weight.dtype}, MATCH={hidden_states.dtype == self.x_embedder.weight.dtype}")
+        logger.warning(f"my_debug_dtype [DEVICE CHECK] input_device={hidden_states.device}, weight_device={self.x_embedder.weight.device}, MATCH={hidden_states.device == self.x_embedder.weight.device}")
+        logger.warning("my_debug_dtype ===== x_embedder END =====")
+        # ===== END DEBUG LOGGING =====
+
+        try:
+            hidden_states = self.x_embedder(hidden_states)
+        except Exception as e:
+            logger.warning(f"my_debug_dtype ===== ERROR in x_embedder =====")
+            logger.warning(f"my_debug_dtype Exception type: {type(e).__name__}")
+            logger.warning(f"my_debug_dtype Exception message: {e}")
+            logger.warning(f"my_debug_dtype Input shape: {hidden_states.shape}, dtype: {hidden_states.dtype}, device: {hidden_states.device}")
+            logger.warning(f"my_debug_dtype x_embedder.weight shape: {self.x_embedder.weight.shape}, dtype: {self.x_embedder.weight.dtype}, device: {self.x_embedder.weight.device}")
+            logger.warning(f"my_debug_dtype Expected input features (in_channels): {self.in_channels}, Actual: {hidden_states.shape[-1]}")
+            raise
         logger.info(f"-----my_log----- [Transformer] after x_embedder, hidden_states shape: {hidden_states.shape}")
 
         timestep = timestep.to(device=hidden_states.device, dtype=hidden_states.dtype) * 1000
