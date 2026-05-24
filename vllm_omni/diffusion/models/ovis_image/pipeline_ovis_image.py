@@ -168,7 +168,10 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
         )
 
         self.text_encoder = Qwen3Model.from_pretrained(
-            model, subfolder="text_encoder", local_files_only=local_files_only, torch_dtype=od_config.dtype
+            model,
+            subfolder="text_encoder",
+            local_files_only=local_files_only,
+            # , torch_dtype=od_config.dtype
         )
 
         self.vae = AutoencoderKL.from_pretrained(model, subfolder="vae", local_files_only=local_files_only).to(
@@ -226,7 +229,9 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
         dtype: torch.dtype | None = None,
     ):
         device = device or self._execution_device
-        dtype = dtype or self.text_encoder.dtype
+        # Note: dtype here is the target dtype for the output embeddings.
+        # If not specified, use the transformer's dtype from od_config.
+        target_dtype = dtype or self.od_config.dtype
 
         messages = self._get_messages(prompt)
 
@@ -256,6 +261,11 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
         _, seq_len, _ = prompt_embeds.shape
         prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
         prompt_embeds = prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
+
+        # Ensure prompt_embeds matches the target dtype (transformer's dtype)
+        # This handles the case where text_encoder may be in a different dtype
+        # (e.g., float32 for higher precision) than the transformer (e.g., bfloat16).
+        prompt_embeds = prompt_embeds.to(dtype=target_dtype)
 
         return prompt_embeds
 
@@ -289,11 +299,12 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
                 num_images_per_prompt=num_images_per_prompt,
             )
 
-        dtype = self.text_encoder.dtype if self.text_encoder is not None else self.transformer.dtype
+        # Use transformer's dtype from config for text_ids to ensure consistency
+        target_dtype = self.od_config.dtype
         text_ids = torch.zeros(prompt_embeds.shape[1], 3)
         text_ids[..., 1] = text_ids[..., 1] + torch.arange(prompt_embeds.shape[1])[None, :]
         text_ids[..., 2] = text_ids[..., 2] + torch.arange(prompt_embeds.shape[1])[None, :]
-        text_ids = text_ids.to(device=device, dtype=dtype)
+        text_ids = text_ids.to(device=device, dtype=target_dtype)
         return prompt_embeds, text_ids
 
     def check_inputs(
