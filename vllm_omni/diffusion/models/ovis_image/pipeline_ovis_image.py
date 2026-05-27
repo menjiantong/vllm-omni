@@ -194,7 +194,7 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
         # Load text_encoder
         logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Loading text_encoder from {model}/text_encoder")
         self.text_encoder = Qwen3Model.from_pretrained(
-            model, subfolder="text_encoder", local_files_only=local_files_only
+            model, subfolder="text_encoder", local_files_only=local_files_only, dtype=od_config.dtype
         )
         logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Text encoder loaded: {type(self.text_encoder).__name__}")
         logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Text encoder dtype={self.text_encoder.dtype}, device={next(self.text_encoder.parameters()).device if hasattr(self.text_encoder, 'parameters') else 'N/A'}")
