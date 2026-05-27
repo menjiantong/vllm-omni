@@ -45,22 +45,32 @@ from vllm_omni.model_executor.model_loader.weight_utils import download_weights_
 
 logger = init_logger(__name__)
 
+# ----my_debug---- Module loaded
+logger.info("----my_debug---- [pipeline_ovis_image.py] Module loaded successfully")
+
 
 def get_ovis_image_post_process_func(
     od_config: OmniDiffusionConfig,
 ):
+    logger.info("----my_debug---- [get_ovis_image_post_process_func] Starting post process func setup")
     model_name = od_config.model
+    logger.info(f"----my_debug---- [get_ovis_image_post_process_func] model_name={model_name}")
     if os.path.exists(model_name):
         model_path = model_name
+        logger.info(f"----my_debug---- [get_ovis_image_post_process_func] Using local model path: {model_path}")
     else:
         model_path = download_weights_from_hf_specific(model_name, None, ["*"])
+        logger.info(f"----my_debug---- [get_ovis_image_post_process_func] Downloaded model to: {model_path}")
 
     vae_config_path = os.path.join(model_path, "vae/config.json")
+    logger.info(f"----my_debug---- [get_ovis_image_post_process_func] Loading VAE config from: {vae_config_path}")
     with open(vae_config_path) as f:
         vae_config = json.load(f)
         vae_scale_factor = 2 ** (len(vae_config["block_out_channels"]) - 1) if "block_out_channels" in vae_config else 8
+        logger.info(f"----my_debug---- [get_ovis_image_post_process_func] VAE config: block_out_channels={vae_config.get('block_out_channels')}, vae_scale_factor={vae_scale_factor}")
 
     image_processor = VaeImageProcessor(vae_scale_factor=vae_scale_factor * 2)
+    logger.info(f"----my_debug---- [get_ovis_image_post_process_func] Image processor created with vae_scale_factor={vae_scale_factor * 2}")
 
     def post_process_func(images: torch.Tensor):
         return image_processor.postprocess(images)
@@ -148,8 +158,13 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
         od_config: OmniDiffusionConfig,
         prefix: str = "",
     ):
+        logger.info("----my_debug---- [OvisImagePipeline.__init__] Starting pipeline initialization")
         super().__init__()
         self.od_config = od_config
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] od_config.model={od_config.model}")
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] od_config.dtype={od_config.dtype}")
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] od_config.tf_model_config={od_config.tf_model_config}")
+
         self.weights_sources = [
             DiffusersPipelineLoader.ComponentSource(
                 model_or_path=od_config.model,
@@ -159,29 +174,63 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
                 fall_back_to_pt=True,
             )
         ]
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] weights_sources configured: subfolder=transformer, prefix=transformer.")
 
         self._execution_device = get_local_device()
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] _execution_device={self._execution_device}")
+
         model = od_config.model
         local_files_only = os.path.exists(model)
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] local_files_only={local_files_only}, model_path_exists={os.path.exists(model)}")
+
+        # Load scheduler
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Loading scheduler from {model}/scheduler")
         self.scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
             model, subfolder="scheduler", local_files_only=local_files_only
         )
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Scheduler loaded: {type(self.scheduler).__name__}")
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Scheduler config: {self.scheduler.config}")
 
+        # Load text_encoder
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Loading text_encoder from {model}/text_encoder")
         self.text_encoder = Qwen3Model.from_pretrained(
             model, subfolder="text_encoder", local_files_only=local_files_only
         )
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Text encoder loaded: {type(self.text_encoder).__name__}")
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Text encoder dtype={self.text_encoder.dtype}, device={next(self.text_encoder.parameters()).device if hasattr(self.text_encoder, 'parameters') else 'N/A'}")
+        # Log text encoder config
+        if hasattr(self.text_encoder, 'config'):
+            te_config = self.text_encoder.config
+            logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Text encoder config: hidden_size={getattr(te_config, 'hidden_size', 'N/A')}, num_attention_heads={getattr(te_config, 'num_attention_heads', 'N/A')}, num_hidden_layers={getattr(te_config, 'num_hidden_layers', 'N/A')}, vocab_size={getattr(te_config, 'vocab_size', 'N/A')}")
 
+        # Load VAE
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Loading VAE from {model}/vae")
         self.vae = AutoencoderKL.from_pretrained(model, subfolder="vae", local_files_only=local_files_only).to(
             self._execution_device
         )
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] VAE loaded: {type(self.vae).__name__}")
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] VAE dtype={self.vae.dtype}, device={next(self.vae.parameters()).device}")
+        # Log VAE config
+        if hasattr(self.vae, 'config'):
+            vae_config = self.vae.config
+            logger.info(f"----my_debug---- [OvisImagePipeline.__init__] VAE config: block_out_channels={vae_config.block_out_channels if hasattr(vae_config, 'block_out_channels') else 'N/A'}, latent_channels={getattr(vae_config, 'latent_channels', 'N/A')}, scaling_factor={getattr(vae_config, 'scaling_factor', 'N/A')}, shift_factor={getattr(vae_config, 'shift_factor', 'N/A')}")
 
+        # Load tokenizer
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Loading tokenizer from {model}/tokenizer")
         self.tokenizer = Qwen2TokenizerFast.from_pretrained(
             model, subfolder="tokenizer", local_files_only=local_files_only
         )
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Tokenizer loaded: {type(self.tokenizer).__name__}")
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Tokenizer vocab_size={self.tokenizer.vocab_size}, model_max_length={self.tokenizer.model_max_length}")
 
+        # Initialize transformer
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Initializing OvisImageTransformer2DModel")
         self.transformer = OvisImageTransformer2DModel(od_config=od_config)
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Transformer initialized: {type(self.transformer).__name__}")
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] Transformer in_channels={self.transformer.in_channels}, out_channels={self.transformer.out_channels}, inner_dim={self.transformer.inner_dim}")
 
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] vae_scale_factor={self.vae_scale_factor}")
 
         self.tokenizer_max_length = 1024
         self.system_prompt = """Describe the image by detailing the color, quantity, text, shape, size, texture, spatial
@@ -189,14 +238,18 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
         self.user_prompt_begin_id = 28
         self.tokenizer_max_length = 256 + self.user_prompt_begin_id
         self.default_sample_size = 128
+        logger.info(f"----my_debug---- [OvisImagePipeline.__init__] tokenizer_max_length={self.tokenizer_max_length}, user_prompt_begin_id={self.user_prompt_begin_id}, default_sample_size={self.default_sample_size}")
+
         self.setup_diffusion_pipeline_profiler(
             enable_diffusion_pipeline_profiler=self.od_config.enable_diffusion_pipeline_profiler
         )
+        logger.info("----my_debug---- [OvisImagePipeline.__init__] Pipeline initialization complete")
 
     def _get_messages(
         self,
         prompt: str | list[str] = None,
     ):
+        logger.info(f"----my_debug---- [_get_messages] Input prompt type: {type(prompt)}, value: {prompt[:100] if isinstance(prompt, str) else prompt}")
         prompt = [prompt] if isinstance(prompt, str) else prompt
 
         messages = []
@@ -216,6 +269,9 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
             )
             messages.append(message)
 
+        logger.info(f"----my_debug---- [_get_messages] Generated {len(messages)} messages")
+        for i, msg in enumerate(messages):
+            logger.info(f"----my_debug---- [_get_messages] Message {i} length: {len(msg)} chars, preview: {msg[:200]}...")
         return messages
 
     def _get_ovis_prompt_embeds(
@@ -225,13 +281,18 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ):
+        logger.info("----my_debug---- [_get_ovis_prompt_embeds] Starting prompt embedding generation")
         device = device or self._execution_device
         dtype = dtype or self.text_encoder.dtype
+        logger.info(f"----my_debug---- [_get_ovis_prompt_embeds] device={device}, dtype={dtype}")
 
         messages = self._get_messages(prompt)
 
         batch_size = len(messages)
+        logger.info(f"----my_debug---- [_get_ovis_prompt_embeds] batch_size={batch_size}, num_images_per_prompt={num_images_per_prompt}")
 
+        # Tokenization
+        logger.info(f"----my_debug---- [_get_ovis_prompt_embeds] Tokenizing with max_length={self.tokenizer_max_length}")
         tokens = self.tokenizer(
             messages,
             padding="max_length",
@@ -243,19 +304,31 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
 
         input_ids = tokens.input_ids.to(device=device)
         attention_mask = tokens.attention_mask.to(device=device)
+        logger.info(f"----my_debug---- [_get_ovis_prompt_embeds] input_ids shape={input_ids.shape}, dtype={input_ids.dtype}")
+        logger.info(f"----my_debug---- [_get_ovis_prompt_embeds] attention_mask shape={attention_mask.shape}, dtype={attention_mask.dtype}")
+        logger.info(f"----my_debug---- [_get_ovis_prompt_embeds] input_ids sample (first 50 tokens): {input_ids[0, :50].tolist()}")
 
+        # Text encoder forward pass
+        logger.info(f"----my_debug---- [_get_ovis_prompt_embeds] Running text encoder forward pass")
         outputs = self.text_encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
         )
 
         prompt_embeds = outputs.last_hidden_state
+        logger.info(f"----my_debug---- [_get_ovis_prompt_embeds] last_hidden_state shape={prompt_embeds.shape}, dtype={prompt_embeds.dtype}")
+        logger.info(f"----my_debug---- [_get_ovis_prompt_embeds] last_hidden_state stats: min={prompt_embeds.min().item():.4f}, max={prompt_embeds.max().item():.4f}, mean={prompt_embeds.mean().item():.4f}")
+
         prompt_embeds = prompt_embeds * attention_mask[..., None]
+        logger.info(f"----my_debug---- [_get_ovis_prompt_embeds] After attention mask multiplication: shape={prompt_embeds.shape}")
+
         prompt_embeds = prompt_embeds[:, self.user_prompt_begin_id :, :]
+        logger.info(f"----my_debug---- [_get_ovis_prompt_embeds] After slicing from user_prompt_begin_id={self.user_prompt_begin_id}: shape={prompt_embeds.shape}")
 
         _, seq_len, _ = prompt_embeds.shape
         prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
         prompt_embeds = prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
+        logger.info(f"----my_debug---- [_get_ovis_prompt_embeds] Final prompt_embeds shape={prompt_embeds.shape}")
 
         return prompt_embeds
 
@@ -279,6 +352,8 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
                 Pre-generated text embeddings. Can be used to easily tweak text inputs, *e.g.* prompt weighting.
                 If not provided, text embeddings will be generated from `prompt` input argument.
         """
+        logger.info("----my_debug---- [encode_prompt] Starting prompt encoding")
+        logger.info(f"----my_debug---- [encode_prompt] prompt={prompt[:100] if isinstance(prompt, str) else prompt}, num_images_per_prompt={num_images_per_prompt}")
 
         device = device or self._execution_device
 
@@ -288,12 +363,16 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
                 device=device,
                 num_images_per_prompt=num_images_per_prompt,
             )
+        else:
+            logger.info(f"----my_debug---- [encode_prompt] Using pre-generated prompt_embeds, shape={prompt_embeds.shape}")
 
         dtype = self.text_encoder.dtype if self.text_encoder is not None else self.transformer.dtype
         text_ids = torch.zeros(prompt_embeds.shape[1], 3)
         text_ids[..., 1] = text_ids[..., 1] + torch.arange(prompt_embeds.shape[1])[None, :]
         text_ids[..., 2] = text_ids[..., 2] + torch.arange(prompt_embeds.shape[1])[None, :]
         text_ids = text_ids.to(device=device, dtype=dtype)
+        logger.info(f"----my_debug---- [encode_prompt] text_ids shape={text_ids.shape}, dtype={text_ids.dtype}")
+        logger.info(f"----my_debug---- [encode_prompt] text_ids sample (first 5 rows): {text_ids[:5].tolist()}")
         return prompt_embeds, text_ids
 
     def check_inputs(
@@ -389,14 +468,20 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
         generator,
         latents=None,
     ):
+        logger.info("----my_debug---- [prepare_latents] Starting latent preparation")
+        logger.info(f"----my_debug---- [prepare_latents] Input: batch_size={batch_size}, num_channel_latents={num_channel_latents}, height={height}, width={width}, dtype={dtype}, device={device}")
+
         # VAE applies 8x compression on images but we must also account for packing which requires
         # latent height and width to be divisible by 2.
         height = int(2 * (int(height) // (self.vae_scale_factor * 2)))
         width = int(2 * (int(width) // (self.vae_scale_factor * 2)))
+        logger.info(f"----my_debug---- [prepare_latents] After VAE scaling: height={height}, width={width}")
 
         shape = (batch_size, num_channel_latents, height, width)
+        logger.info(f"----my_debug---- [prepare_latents] Latent shape before packing: {shape}")
 
         if latents is not None:
+            logger.info(f"----my_debug---- [prepare_latents] Using provided latents, shape={latents.shape}")
             latent_image_ids = self._prepare_latent_image_ids(batch_size, height // 2, width // 2, device, dtype)
             return latents.to(device=device, dtype=dtype), latent_image_ids
 
@@ -405,17 +490,27 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
                 f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
                 f" size of {batch_size}. Make sure the batch size matches the length of the generators."
             )
+        logger.info(f"----my_debug---- [prepare_latents] Generating random noise with generator={generator}")
         latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+        logger.info(f"----my_debug---- [prepare_latents] Random noise generated: shape={latents.shape}, dtype={latents.dtype}")
+        logger.info(f"----my_debug---- [prepare_latents] Random noise stats: min={latents.min().item():.4f}, max={latents.max().item():.4f}, mean={latents.mean().item():.4f}, std={latents.std().item():.4f}")
+
         latents = self._pack_latents(latents, batch_size, num_channel_latents, height, width)
+        logger.info(f"----my_debug---- [prepare_latents] After packing: shape={latents.shape}")
 
         latent_image_ids = self._prepare_latent_image_ids(batch_size, height // 2, width // 2, device, dtype)
+        logger.info(f"----my_debug---- [prepare_latents] latent_image_ids shape={latent_image_ids.shape}, dtype={latent_image_ids.dtype}")
 
         return latents, latent_image_ids
 
     def prepare_timesteps(self, num_inference_steps, sigmas, image_seq_len):
+        logger.info("----my_debug---- [prepare_timesteps] Starting timesteps preparation")
+        logger.info(f"----my_debug---- [prepare_timesteps] num_inference_steps={num_inference_steps}, sigmas={sigmas}, image_seq_len={image_seq_len}")
+
         sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
         if hasattr(self.scheduler.config, "use_flow_sigmas") and self.scheduler.config.use_flow_sigmas:
             sigmas = None
+        logger.info(f"----my_debug---- [prepare_timesteps] sigmas after processing: {sigmas[:5] if sigmas is not None else None}... (first 5)")
 
         mu = calculate_shift(
             image_seq_len,
@@ -424,6 +519,7 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
             self.scheduler.config.get("base_shift", 0.5),
             self.scheduler.config.get("max_shift", 1.15),
         )
+        logger.info(f"----my_debug---- [prepare_timesteps] calculated mu={mu}")
 
         timesteps, num_inference_steps = retrieve_timesteps(
             self.scheduler,
@@ -432,6 +528,9 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
             sigmas=sigmas,
             mu=mu,
         )
+        logger.info(f"----my_debug---- [prepare_timesteps] timesteps shape={timesteps.shape}, num_inference_steps={num_inference_steps}")
+        logger.info(f"----my_debug---- [prepare_timesteps] timesteps values (first 10): {timesteps[:10].tolist()}")
+        logger.info(f"----my_debug---- [prepare_timesteps] timesteps values (last 10): {timesteps[-10:].tolist()}")
         return timesteps, num_inference_steps
 
     def diffuse(
@@ -465,14 +564,26 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
         Returns:
             Denoised latents
         """
+        logger.info("----my_debug---- [diffuse] Starting diffusion loop")
+        logger.info(f"----my_debug---- [diffuse] latents shape={latents.shape}, dtype={latents.dtype}")
+        logger.info(f"----my_debug---- [diffuse] timesteps count={len(timesteps)}, range=[{timesteps[0].item():.4f}, {timesteps[-1].item():.4f}]")
+        logger.info(f"----my_debug---- [diffuse] prompt_embeds shape={prompt_embeds.shape}")
+        logger.info(f"----my_debug---- [diffuse] text_ids shape={text_ids.shape}")
+        logger.info(f"----my_debug---- [diffuse] latent_image_ids shape={latent_image_ids.shape}")
+        logger.info(f"----my_debug---- [diffuse] do_true_cfg={do_true_cfg}, guidance_scale={guidance_scale}, cfg_normalize={cfg_normalize}")
+
         self.scheduler.set_begin_index(0)
 
         for i, t in enumerate(timesteps):
             if self.interrupt:
+                logger.info(f"----my_debug---- [diffuse] Interrupted at step {i}")
                 break
 
             self._current_timestep = t
             timestep = t.expand(latents.shape[0]).to(latents.dtype)
+
+            if i == 0 or i == len(timesteps) - 1:
+                logger.info(f"----my_debug---- [diffuse] Step {i}/{len(timesteps)}: timestep={t.item():.4f}, latents stats: min={latents.min().item():.4f}, max={latents.max().item():.4f}, mean={latents.mean().item():.4f}")
 
             positive_kwargs = {
                 "hidden_states": latents,
@@ -503,9 +614,14 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
                 cfg_normalize,
             )
 
+            if i == 0 or i == len(timesteps) - 1:
+                logger.info(f"----my_debug---- [diffuse] Step {i}: noise_pred shape={noise_pred.shape}, stats: min={noise_pred.min().item():.4f}, max={noise_pred.max().item():.4f}, mean={noise_pred.mean().item():.4f}")
+
             # Compute the previous noisy sample x_t -> x_t-1 with automatic CFG sync
             latents = self.scheduler_step_maybe_with_cfg(noise_pred, t, latents, do_true_cfg)
 
+        logger.info(f"----my_debug---- [diffuse] Diffusion loop complete, final latents shape={latents.shape}")
+        logger.info(f"----my_debug---- [diffuse] Final latents stats: min={latents.min().item():.4f}, max={latents.max().item():.4f}, mean={latents.mean().item():.4f}")
         return latents
 
     @property
@@ -618,6 +734,11 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
             [`~pipelines.ovis_image.OvisImagePipelineOutput`] if `return_dict` is True, otherwise a `tuple`. When
             returning a tuple, the first element is a list with the generated images.
         """
+        logger.info("----my_debug---- [forward] ============ OvisImagePipeline.forward START ============")
+        logger.info(f"----my_debug---- [forward] Request prompts: {req.prompts}")
+        logger.info(f"----my_debug---- [forward] Request sampling_params: height={req.sampling_params.height}, width={req.sampling_params.width}, num_inference_steps={req.sampling_params.num_inference_steps}, guidance_scale={req.sampling_params.guidance_scale}")
+        logger.info(f"----my_debug---- [forward] Request seed={req.sampling_params.seed}, generator={req.sampling_params.generator}")
+
         # TODO: In online mode, sometimes it receives [{"negative_prompt": None}, {...}], so cannot use .get("...", "")
         # TODO: May be some data formatting operations on the API side. Hack for now.
         prompt = [p if isinstance(p, str) else (p.get("prompt") or "") for p in req.prompts] or prompt
@@ -625,6 +746,9 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
             negative_prompt = None
         elif req.prompts:
             negative_prompt = ["" if isinstance(p, str) else (p.get("negative_prompt") or "") for p in req.prompts]
+
+        logger.info(f"----my_debug---- [forward] Processed prompt: {prompt}")
+        logger.info(f"----my_debug---- [forward] Processed negative_prompt: {negative_prompt}")
 
         height = req.sampling_params.height or self.default_sample_size * self.vae_scale_factor
         width = req.sampling_params.width or self.default_sample_size * self.vae_scale_factor
@@ -640,6 +764,8 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
             else num_images_per_prompt
         )
 
+        logger.info(f"----my_debug---- [forward] Final parameters: height={height}, width={width}, num_inference_steps={num_inference_steps}, guidance_scale={guidance_scale}, num_images_per_prompt={num_images_per_prompt}")
+
         # Steps:
         # 1. Check Inputs
         # 2. encode prompts
@@ -649,6 +775,7 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
         # 7. decode latents
         # 8. post process outputs
 
+        logger.info("----my_debug---- [forward] Step 1: Checking inputs")
         self.check_inputs(
             prompt,
             height,
@@ -676,6 +803,9 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
             batch_size = prompt_embeds.shape[0]
 
         do_classifier_free_guidance = guidance_scale > 1.0
+        logger.info(f"----my_debug---- [forward] batch_size={batch_size}, do_classifier_free_guidance={do_classifier_free_guidance}")
+
+        logger.info("----my_debug---- [forward] Step 2: Encoding prompts")
         prompt_embeds, text_ids = self.encode_prompt(
             prompt=prompt,
             prompt_embeds=prompt_embeds,
@@ -685,6 +815,7 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
 
         negative_text_ids = None
         if do_classifier_free_guidance:
+            logger.info("----my_debug---- [forward] Encoding negative prompts for CFG")
             negative_prompt = negative_prompt if negative_prompt is not None else ""
             negative_prompt_embeds, negative_text_ids = self.encode_prompt(
                 prompt=negative_prompt,
@@ -692,9 +823,12 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
                 device=device,
                 num_images_per_prompt=num_images_per_prompt,
             )
+            logger.info(f"----my_debug---- [forward] negative_prompt_embeds shape={negative_prompt_embeds.shape}")
 
         # 4. Prepare latent variables
+        logger.info("----my_debug---- [forward] Step 4: Preparing latent variables")
         num_channel_latents = self.transformer.in_channels // 4
+        logger.info(f"----my_debug---- [forward] num_channel_latents={num_channel_latents} (transformer.in_channels={self.transformer.in_channels})")
         latents, latent_image_ids = self.prepare_latents(
             batch_size=batch_size * num_images_per_prompt,
             num_channel_latents=num_channel_latents,
@@ -707,6 +841,7 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
         )
 
         # 5. Prepare timesteps
+        logger.info("----my_debug---- [forward] Step 5: Preparing timesteps")
 
         image_seq_len = latents.shape[1]
         timesteps, num_inference_steps = self.prepare_timesteps(num_inference_steps, sigmas, image_seq_len)
@@ -718,6 +853,7 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
             self._joint_attention_kwargs = {}
 
         # 6. Denoising loop using diffuse method
+        logger.info("----my_debug---- [forward] Step 6: Starting denoising loop")
         latents = self.diffuse(
             latents=latents,
             timesteps=timesteps,
@@ -732,17 +868,31 @@ class OvisImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMi
         )
 
         self._current_timestep = None
+        logger.info("----my_debug---- [forward] Step 7: Decoding latents")
         if output_type == "latent":
             image = latents
+            logger.info(f"----my_debug---- [forward] Output type is 'latent', skipping VAE decode")
         else:
+            logger.info(f"----my_debug---- [forward] Unpacking latents from shape {latents.shape}")
             latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
+            logger.info(f"----my_debug---- [forward] Unpacked latents shape={latents.shape}")
+            logger.info(f"----my_debug---- [forward] VAE config: scaling_factor={self.vae.config.scaling_factor}, shift_factor={self.vae.config.shift_factor}")
             latents = (latents / self.vae.config.scaling_factor) + self.vae.config.shift_factor
+            logger.info(f"----my_debug---- [forward] Latents after scaling: shape={latents.shape}, stats: min={latents.min().item():.4f}, max={latents.max().item():.4f}")
+            logger.info(f"----my_debug---- [forward] Running VAE decode")
             image = self.vae.decode(latents, return_dict=False)[0]
+            logger.info(f"----my_debug---- [forward] VAE decode output shape={image.shape}, dtype={image.dtype}")
+            logger.info(f"----my_debug---- [forward] VAE decode output stats: min={image.min().item():.4f}, max={image.max().item():.4f}, mean={image.mean().item():.4f}")
 
+        logger.info("----my_debug---- [forward] ============ OvisImagePipeline.forward END ============")
         return DiffusionOutput(
             output=image, stage_durations=self.stage_durations if hasattr(self, "stage_durations") else None
         )
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+        logger.info("----my_debug---- [load_weights] Starting weights loading for OvisImagePipeline")
         loader = AutoWeightsLoader(self)
-        return loader.load_weights(weights)
+        loaded_params = loader.load_weights(weights)
+        logger.info(f"----my_debug---- [load_weights] Loaded {len(loaded_params)} parameters")
+        logger.info(f"----my_debug---- [load_weights] Sample loaded params (first 10): {list(loaded_params)[:10]}")
+        return loaded_params

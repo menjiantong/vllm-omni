@@ -41,6 +41,9 @@ from vllm_omni.worker.omni_connector_model_runner_mixin import OmniConnectorMode
 
 logger = init_logger(__name__)
 
+# ----my_debug---- Module loaded
+logger.info("----my_debug---- [diffusion_model_runner.py] Module loaded successfully")
+
 
 class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
     """
@@ -65,6 +68,12 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
             od_config: OmniDiffusion configuration.
             device: The device to run on.
         """
+        logger.info("----my_debug---- [DiffusionModelRunner.__init__] Initializing model runner")
+        logger.info(f"----my_debug---- [DiffusionModelRunner.__init__] od_config.model={od_config.model}")
+        logger.info(f"----my_debug---- [DiffusionModelRunner.__init__] od_config.model_class_name={od_config.model_class_name}")
+        logger.info(f"----my_debug---- [DiffusionModelRunner.__init__] device={device}")
+        logger.info(f"----my_debug---- [DiffusionModelRunner.__init__] od_config.dtype={od_config.dtype}")
+
         self.vllm_config = vllm_config
         self.od_config = od_config
         self.device = device
@@ -77,6 +86,7 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
 
         # Initialize KV cache manager for connector management
         self.kv_transfer_manager = OmniKVTransferManager.from_od_config(od_config)
+        logger.info("----my_debug---- [DiffusionModelRunner.__init__] Model runner initialized")
 
     def _compile_transformer(self, attr_name: str) -> None:
         """Compile a transformer attribute on the pipeline with torch.compile."""
@@ -112,13 +122,20 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
                     don't require default weights.
             custom_pipeline_name: Optional custom pipeline class name to use.
         """
+        logger.info("----my_debug---- [load_model] ============ DiffusionModelRunner.load_model START ============")
+        logger.info(f"----my_debug---- [load_model] load_format={load_format}")
+        logger.info(f"----my_debug---- [load_model] custom_pipeline_name={custom_pipeline_name}")
+        logger.info(f"----my_debug---- [load_model] od_config.enable_cpu_offload={self.od_config.enable_cpu_offload}")
+        logger.info(f"----my_debug---- [load_model] od_config.enable_layerwise_offload={self.od_config.enable_layerwise_offload}")
 
         if load_format == "dummy":
+            logger.info("----my_debug---- [load_model] load_format is 'dummy', skipping model loading")
             return
 
         load_device = (
             "cpu" if self.od_config.enable_cpu_offload or self.od_config.enable_layerwise_offload else str(self.device)
         )
+        logger.info(f"----my_debug---- [load_model] load_device={load_device}")
 
         def get_memory_context():
             if memory_pool_context_fn is not None:
@@ -130,6 +147,7 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
         model_loader = DiffusersPipelineLoader(load_config, od_config=self.od_config)
         time_before_load = time.perf_counter()
 
+        logger.info(f"----my_debug---- [load_model] Calling model_loader.load_model...")
         with get_memory_context():
             with DeviceMemoryProfiler() as m:
                 self.pipeline = model_loader.load_model(
@@ -146,7 +164,8 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
             m.consumed_memory / GiB_bytes,
             time_after_load - time_before_load,
         )
-        logger.info("Model runner: Model loaded successfully.")
+        logger.info(f"----my_debug---- [load_model] Model loading took {m.consumed_memory / GiB_bytes:.4f} GiB and {time_after_load - time_before_load:.6f} seconds")
+        logger.info("----my_debug---- [load_model] Model loaded successfully.")
 
         if getattr(self.od_config, "step_execution", False) and not self.supports_step_mode():
             raise ValueError(
@@ -158,12 +177,14 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
         # Apply CPU offloading
         self.offload_backend = get_offload_backend(self.od_config, device=self.device)
         if self.offload_backend is not None:
-            logger.info(f" Enabling offloader backend: {self.offload_backend.__class__.__name__}")
+            logger.info(f"----my_debug---- [load_model] Enabling offloader backend: {self.offload_backend.__class__.__name__}")
             self.offload_backend.enable(self.pipeline)
 
         # Apply torch.compile if not in eager mode
+        logger.info(f"----my_debug---- [load_model] od_config.enforce_eager={self.od_config.enforce_eager}")
         if not self.od_config.enforce_eager:
             if current_omni_platform.supports_torch_inductor():
+                logger.info("----my_debug---- [load_model] Compiling transformer with torch.compile...")
                 self._compile_transformer("transformer")
                 self._compile_transformer("transformer_2")
             else:
@@ -173,6 +194,7 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
                 )
 
         # Setup cache backend
+        logger.info(f"----my_debug---- [load_model] Setting up cache backend: {self.od_config.cache_backend}")
         self.cache_backend = get_cache_backend(self.od_config.cache_backend, self.od_config.cache_config)
 
         if self.cache_backend is not None:
@@ -187,7 +209,7 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
             else:
                 self.cache_backend.enable(self.pipeline)
 
-        logger.info("Model runner: Initialization complete.")
+        logger.info("----my_debug---- [load_model] ============ DiffusionModelRunner.load_model END ============")
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         """Load weights into the pipeline."""

@@ -36,6 +36,9 @@ from vllm_omni.diffusion.layers.rope import RotaryEmbedding
 
 logger = init_logger(__name__)
 
+# ----my_debug---- Module loaded
+logger.info("----my_debug---- [ovis_image_transformer.py] Module loaded successfully")
+
 
 class OvisImageAttention(nn.Module):
     def __init__(
@@ -54,6 +57,7 @@ class OvisImageAttention(nn.Module):
         pre_only: bool = False,
     ):
         super().__init__()
+        logger.info(f"----my_debug---- [OvisImageAttention.__init__] Initializing attention: query_dim={query_dim}, heads={heads}, dim_head={dim_head}, added_kv_proj_dim={added_kv_proj_dim}, pre_only={pre_only}")
 
         self.head_dim = dim_head
         self.inner_dim = out_dim if out_dim is not None else dim_head * heads
@@ -77,6 +81,7 @@ class OvisImageAttention(nn.Module):
             disable_tp=True,
             bias=bias,
         )
+        logger.info(f"----my_debug---- [OvisImageAttention.__init__] to_qkv: hidden_size={query_dim}, head_size={self.head_dim}, total_num_heads={self.heads}")
 
         if not self.pre_only:
             self.to_out = nn.ModuleList([])
@@ -94,6 +99,7 @@ class OvisImageAttention(nn.Module):
                 disable_tp=True,
                 bias=added_proj_bias,
             )
+            logger.info(f"----my_debug---- [OvisImageAttention.__init__] add_kv_proj: hidden_size={self.added_kv_proj_dim}, head_size={self.head_dim}, total_num_heads={self.heads}")
 
             self.to_add_out = ReplicatedLinear(self.inner_dim, query_dim, bias=out_bias)
 
@@ -104,6 +110,7 @@ class OvisImageAttention(nn.Module):
             softmax_scale=1.0 / (self.head_dim**0.5),
             causal=False,
         )
+        logger.info(f"----my_debug---- [OvisImageAttention.__init__] Attention initialized: inner_dim={self.inner_dim}, out_dim={self.out_dim}, heads={self.heads}")
 
     def forward(
         self,
@@ -112,13 +119,19 @@ class OvisImageAttention(nn.Module):
         image_rotary_emb: torch.Tensor | None = None,
         **kwargs,
     ) -> torch.Tensor:
+        logger.info(f"----my_debug---- [OvisImageAttention.forward] hidden_states shape={hidden_states.shape}, dtype={hidden_states.dtype}")
+        if encoder_hidden_states is not None:
+            logger.info(f"----my_debug---- [OvisImageAttention.forward] encoder_hidden_states shape={encoder_hidden_states.shape}")
+
         qkv, _ = self.to_qkv(hidden_states)
+        logger.info(f"----my_debug---- [OvisImageAttention.forward] qkv shape after to_qkv={qkv.shape}")
 
         query, key, value = qkv.chunk(3, dim=-1)
 
         query = query.unflatten(-1, (self.heads, -1))
         key = key.unflatten(-1, (self.heads, -1))
         value = value.unflatten(-1, (self.heads, -1))
+        logger.info(f"----my_debug---- [OvisImageAttention.forward] query shape after unflatten={query.shape}, key={key.shape}, value={value.shape}")
 
         query = self.norm_q(query)
         key = self.norm_k(key)
@@ -137,26 +150,32 @@ class OvisImageAttention(nn.Module):
             query = torch.cat([encoder_query, query], dim=1)
             key = torch.cat([encoder_key, key], dim=1)
             value = torch.cat([encoder_value, value], dim=1)
+            logger.info(f"----my_debug---- [OvisImageAttention.forward] After cat with encoder: query={query.shape}, key={key.shape}, value={value.shape}")
 
         if image_rotary_emb is not None:
             cos, sin = image_rotary_emb  # [S, D/2]
             cos = cos.to(query.dtype)
             sin = sin.to(query.dtype)
+            logger.info(f"----my_debug---- [OvisImageAttention.forward] Applying RoPE: cos shape={cos.shape}, sin shape={sin.shape}")
             query = self.rope(query, cos, sin)
             key = self.rope(key, cos, sin)
 
+        logger.info(f"----my_debug---- [OvisImageAttention.forward] Running attention: query={query.shape}, key={key.shape}, value={value.shape}")
         hidden_states = self.attn(
             query,
             key,
             value,
         )
+        logger.info(f"----my_debug---- [OvisImageAttention.forward] Attention output shape={hidden_states.shape}")
         hidden_states = hidden_states.flatten(2, 3)
         hidden_states = hidden_states.to(query.dtype)
+        logger.info(f"----my_debug---- [OvisImageAttention.forward] After flatten: shape={hidden_states.shape}")
 
         if encoder_hidden_states is not None:
             encoder_hidden_states, hidden_states = hidden_states.split_with_sizes(
                 [encoder_hidden_states.shape[1], hidden_states.shape[1] - encoder_hidden_states.shape[1]], dim=1
             )
+            logger.info(f"----my_debug---- [OvisImageAttention.forward] After split: encoder_hidden_states={encoder_hidden_states.shape}, hidden_states={hidden_states.shape}")
             hidden_states = self.to_out[0](hidden_states)
             hidden_states = self.to_out[1](hidden_states)
             encoder_hidden_states, _ = self.to_add_out(encoder_hidden_states)
@@ -382,20 +401,36 @@ class OvisImageTransformer2DModel(nn.Module):
         axes_dims_rope: tuple[int] = (16, 56, 56),
     ):
         super().__init__()
+        logger.info("----my_debug---- [OvisImageTransformer2DModel.__init__] Starting transformer initialization")
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.__init__] od_config.tf_model_config={od_config.tf_model_config}")
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.__init__] Default params: patch_size={patch_size}, in_channels={in_channels}, out_channels={out_channels}")
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.__init__] Default params: num_layers={num_layers}, num_single_layers={num_single_layers}, attention_head_dim={attention_head_dim}, num_attention_heads={num_attention_heads}")
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.__init__] Default params: joint_attention_dim={joint_attention_dim}, axes_dims_rope={axes_dims_rope}")
+
         model_config = od_config.tf_model_config
         num_layers = model_config.num_layers
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.__init__] Overridden num_layers from config: {num_layers}")
+
         self.in_channels = in_channels
         self.out_channels = out_channels or in_channels
         self.inner_dim = num_attention_heads * attention_head_dim
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.__init__] in_channels={self.in_channels}, out_channels={self.out_channels}, inner_dim={self.inner_dim}")
+
         self.pos_embed = OvisImagePosEmbed(theta=10000, axes_dim=axes_dims_rope)
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.__init__] pos_embed initialized with theta=10000, axes_dim={axes_dims_rope}")
 
         self.time_proj = Timesteps(num_channels=256, flip_sin_to_cos=True, downscale_freq_shift=0)
         self.timestep_embedder = TimestepEmbedding(in_channels=256, time_embed_dim=self.inner_dim)
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.__init__] time_proj and timestep_embedder initialized")
 
         self.context_embedder_norm = RMSNorm(joint_attention_dim, eps=1e-6)
         self.context_embedder = nn.Linear(joint_attention_dim, self.inner_dim)
         self.x_embedder = nn.Linear(in_channels, self.inner_dim)
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.__init__] context_embedder_norm: dim={joint_attention_dim}")
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.__init__] context_embedder: in={joint_attention_dim}, out={self.inner_dim}")
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.__init__] x_embedder: in={in_channels}, out={self.inner_dim}")
 
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.__init__] Creating {num_layers} OvisImageTransformerBlock layers")
         self.transformer_blocks = nn.ModuleList(
             [
                 OvisImageTransformerBlock(
@@ -407,6 +442,7 @@ class OvisImageTransformer2DModel(nn.Module):
             ]
         )
 
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.__init__] Creating {num_single_layers} OvisImageSingleTransformerBlock layers")
         self.single_transformer_blocks = nn.ModuleList(
             [
                 OvisImageSingleTransformerBlock(
@@ -417,8 +453,16 @@ class OvisImageTransformer2DModel(nn.Module):
                 for _ in range(num_single_layers)
             ]
         )
+
         self.norm_out = AdaLayerNormContinuous(self.inner_dim, self.inner_dim, elementwise_affine=False, eps=1e-6)
         self.proj_out = nn.Linear(self.inner_dim, patch_size * patch_size * self.out_channels, bias=True)
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.__init__] norm_out and proj_out initialized")
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.__init__] proj_out: in={self.inner_dim}, out={patch_size * patch_size * self.out_channels}")
+
+        # Calculate total parameters
+        total_params = sum(p.numel() for p in self.parameters())
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.__init__] Total parameters: {total_params:,} ({total_params / 1e9:.2f}B)")
+        logger.info("----my_debug---- [OvisImageTransformer2DModel.__init__] Transformer initialization complete")
 
     def forward(
         self,
@@ -451,15 +495,24 @@ class OvisImageTransformer2DModel(nn.Module):
             If `return_dict` is True, an [`~models.transformer_2d.Transformer2DModelOutput`] is returned, otherwise a
             `tuple` where the first element is the sample tensor.
         """
+        logger.info("----my_debug---- [OvisImageTransformer2DModel.forward] ============ Transformer Forward START ============")
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.forward] hidden_states shape={hidden_states.shape}, dtype={hidden_states.dtype}")
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.forward] encoder_hidden_states shape={encoder_hidden_states.shape}, dtype={encoder_hidden_states.dtype}")
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.forward] timestep={timestep}, timestep shape={timestep.shape if hasattr(timestep, 'shape') else 'scalar'}")
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.forward] img_ids shape={img_ids.shape}, txt_ids shape={txt_ids.shape}")
 
         hidden_states = self.x_embedder(hidden_states)
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.forward] After x_embedder: shape={hidden_states.shape}")
         timestep = timestep.to(device=hidden_states.device, dtype=hidden_states.dtype) * 1000
 
         timesteps_proj = self.time_proj(timestep)
         temb = self.timestep_embedder(timesteps_proj.to(device=hidden_states.device, dtype=hidden_states.dtype))
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.forward] temb shape={temb.shape}, dtype={temb.dtype}")
 
         encoder_hidden_states = self.context_embedder_norm(encoder_hidden_states)
         encoder_hidden_states = self.context_embedder(encoder_hidden_states)
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.forward] After context_embedder: encoder_hidden_states shape={encoder_hidden_states.shape}")
+
         if txt_ids.ndim == 3:
             logger.warning(
                 "Passing `txt_ids` 3d torch.Tensor is deprecated."
@@ -474,13 +527,20 @@ class OvisImageTransformer2DModel(nn.Module):
             img_ids = img_ids[0]
 
         ids = torch.cat((txt_ids, img_ids), dim=0)
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.forward] ids shape after concat: {ids.shape}")
+
         if is_torch_npu_available():
             freqs_cos, freqs_sin = self.pos_embed(ids.cpu())
             image_rotary_emb = (freqs_cos.npu(), freqs_sin.npu())
         else:
             image_rotary_emb = self.pos_embed(ids)
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.forward] image_rotary_emb: cos shape={image_rotary_emb[0].shape}, sin shape={image_rotary_emb[1].shape}")
 
+        # Dual-stream transformer blocks
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.forward] Running {len(self.transformer_blocks)} dual-stream transformer blocks")
         for index_block, block in enumerate(self.transformer_blocks):
+            if index_block == 0 or index_block == len(self.transformer_blocks) - 1:
+                logger.info(f"----my_debug---- [OvisImageTransformer2DModel.forward] Block {index_block}: hidden_states shape={hidden_states.shape}")
             encoder_hidden_states, hidden_states = block(
                 hidden_states=hidden_states,
                 encoder_hidden_states=encoder_hidden_states,
@@ -488,7 +548,11 @@ class OvisImageTransformer2DModel(nn.Module):
                 image_rotary_emb=image_rotary_emb,
             )
 
+        # Single-stream transformer blocks
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.forward] Running {len(self.single_transformer_blocks)} single-stream transformer blocks")
         for index_block, block in enumerate(self.single_transformer_blocks):
+            if index_block == 0 or index_block == len(self.single_transformer_blocks) - 1:
+                logger.info(f"----my_debug---- [OvisImageTransformer2DModel.forward] Single Block {index_block}: hidden_states shape={hidden_states.shape}")
             encoder_hidden_states, hidden_states = block(
                 hidden_states=hidden_states,
                 encoder_hidden_states=encoder_hidden_states,
@@ -497,7 +561,11 @@ class OvisImageTransformer2DModel(nn.Module):
             )
 
         hidden_states = self.norm_out(hidden_states, temb)
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.forward] After norm_out: shape={hidden_states.shape}")
         output = self.proj_out(hidden_states)
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.forward] After proj_out: output shape={output.shape}")
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.forward] output stats: min={output.min().item():.4f}, max={output.max().item():.4f}, mean={output.mean().item():.4f}")
+        logger.info("----my_debug---- [OvisImageTransformer2DModel.forward] ============ Transformer Forward END ============")
 
         if not return_dict:
             return (output,)
@@ -505,6 +573,8 @@ class OvisImageTransformer2DModel(nn.Module):
         return Transformer2DModelOutput(sample=output)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+        logger.info("----my_debug---- [OvisImageTransformer2DModel.load_weights] Starting weights loading")
+
         stacked_params_mapping = [
             # self attn
             (".to_qkv", ".to_q", "q"),
@@ -517,8 +587,11 @@ class OvisImageTransformer2DModel(nn.Module):
         ]
         # Expose packed shard mappings for LoRA handling of fused projections.
         self.stacked_params_mapping = stacked_params_mapping
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.load_weights] stacked_params_mapping: {stacked_params_mapping}")
 
         params_dict = dict(self.named_parameters())
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.load_weights] Total parameters in model: {len(params_dict)}")
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.load_weights] Sample parameter names (first 10): {list(params_dict.keys())[:10]}")
 
         # we need to load the buffers for beta and eps (XIELU)
         for name, buffer in self.named_buffers():
@@ -526,7 +599,12 @@ class OvisImageTransformer2DModel(nn.Module):
                 params_dict[name] = buffer
 
         loaded_params: set[str] = set()
+        weight_count = 0
         for name, loaded_weight in weights:
+            weight_count += 1
+            if weight_count <= 5:
+                logger.info(f"----my_debug---- [OvisImageTransformer2DModel.load_weights] Loading weight {weight_count}: name={name}, shape={loaded_weight.shape}, dtype={loaded_weight.dtype}")
+
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
@@ -540,4 +618,14 @@ class OvisImageTransformer2DModel(nn.Module):
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
+
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.load_weights] Total weights processed: {weight_count}")
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.load_weights] Loaded parameters: {len(loaded_params)}")
+        logger.info(f"----my_debug---- [OvisImageTransformer2DModel.load_weights] Sample loaded params (first 10): {list(loaded_params)[:10]}")
+
+        not_loaded = set(params_dict.keys()) - loaded_params
+        if not_loaded:
+            logger.info(f"----my_debug---- [OvisImageTransformer2DModel.load_weights] Parameters not loaded from weights (may be initialized): {len(not_loaded)}")
+            logger.info(f"----my_debug---- [OvisImageTransformer2DModel.load_weights] Sample not loaded params (first 10): {list(not_loaded)[:10]}")
+
         return loaded_params

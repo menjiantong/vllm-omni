@@ -42,6 +42,9 @@ from vllm_omni.diffusion.registry import initialize_model
 
 logger = init_logger(__name__)
 
+# ----my_debug---- Module loaded
+logger.info("----my_debug---- [diffusers_loader.py] Module loaded successfully")
+
 
 def _natural_sort_key(filepath: str) -> list:
     """Natural sort key for filenames with numeric components, e.g.
@@ -84,8 +87,12 @@ class DiffusersPipelineLoader:
     counter_after_loading_weights: float = 0.0
 
     def __init__(self, load_config: LoadConfig, od_config: OmniDiffusionConfig | None = None):
+        logger.info("----my_debug---- [DiffusersPipelineLoader.__init__] Initializing loader")
         self.load_config = load_config
         self.od_config = od_config
+        if od_config is not None:
+            logger.info(f"----my_debug---- [DiffusersPipelineLoader.__init__] od_config.model={od_config.model}")
+            logger.info(f"----my_debug---- [DiffusersPipelineLoader.__init__] od_config.dtype={od_config.dtype}")
 
     def _prepare_weights(
         self,
@@ -98,11 +105,17 @@ class DiffusersPipelineLoader:
         """Prepare weights for the model.
 
         If the model is not local, it will be downloaded."""
+        logger.info("----my_debug---- [_prepare_weights] Starting weight preparation")
+        logger.info(f"----my_debug---- [_prepare_weights] model_name_or_path={model_name_or_path}, subfolder={subfolder}, revision={revision}")
+        logger.info(f"----my_debug---- [_prepare_weights] fall_back_to_pt={fall_back_to_pt}, allow_patterns_overrides={allow_patterns_overrides}")
+
         model_name_or_path = maybe_download_from_modelscope(model_name_or_path, revision) or model_name_or_path
 
         is_local = os.path.isdir(model_name_or_path)
         load_format = self.load_config.load_format
         use_safetensors = False
+        logger.info(f"----my_debug---- [_prepare_weights] is_local={is_local}, load_format={load_format}")
+
         possible_index_files = [
             f"{subfolder}/{index_file}" if subfolder is not None else index_file for index_file in INDEX_FILES
         ]
@@ -114,6 +127,7 @@ class DiffusersPipelineLoader:
                 f"Multiple index files found in {model_name_or_path} with subfolder {subfolder}: {available_index_file}"
             )
         index_file = available_index_file[0] if available_index_file else ""
+        logger.info(f"----my_debug---- [_prepare_weights] index_file={index_file}")
 
         # only hf is supported currently
         if load_format == "auto":
@@ -131,7 +145,10 @@ class DiffusersPipelineLoader:
         if allow_patterns_overrides is not None:
             allow_patterns = allow_patterns_overrides
 
+        logger.info(f"----my_debug---- [_prepare_weights] allow_patterns={allow_patterns}")
+
         if not is_local:
+            logger.info(f"----my_debug---- [_prepare_weights] Downloading weights from HF...")
             hf_folder = download_weights_from_hf(
                 model_name_or_path,
                 self.load_config.download_dir,
@@ -146,6 +163,8 @@ class DiffusersPipelineLoader:
         if subfolder is not None:
             hf_folder = os.path.join(hf_folder, subfolder)
 
+        logger.info(f"----my_debug---- [_prepare_weights] hf_folder={hf_folder}")
+
         hf_weights_files: list[str] = []
         for pattern in allow_patterns:
             hf_weights_files += glob.glob(os.path.join(hf_folder, pattern))
@@ -153,6 +172,12 @@ class DiffusersPipelineLoader:
                 # Decide by actual files rather than pattern name (patterns may include subfolders).
                 use_safetensors = any(f.endswith(".safetensors") for f in hf_weights_files)
                 break
+
+        logger.info(f"----my_debug---- [_prepare_weights] Found {len(hf_weights_files)} weight files, use_safetensors={use_safetensors}")
+        for i, f in enumerate(hf_weights_files[:5]):
+            logger.info(f"----my_debug---- [_prepare_weights] Weight file {i}: {f}")
+        if len(hf_weights_files) > 5:
+            logger.info(f"----my_debug---- [_prepare_weights] ... and {len(hf_weights_files) - 5} more files")
 
         if use_safetensors:
             # For models like Mistral-7B-Instruct-v0.3
@@ -175,6 +200,7 @@ class DiffusersPipelineLoader:
         if len(hf_weights_files) == 0:
             raise RuntimeError(f"Cannot find any model weights with `{model_name_or_path}`")
 
+        logger.info(f"----my_debug---- [_prepare_weights] After filtering: {len(hf_weights_files)} weight files")
         return hf_folder, hf_weights_files, use_safetensors
 
     def _get_weights_iterator(
@@ -298,41 +324,58 @@ class DiffusersPipelineLoader:
         device: torch.device | None = None,
     ) -> nn.Module:
         """Load a model with the given configurations."""
+        logger.info("----my_debug---- [load_model] ============ DiffusersPipelineLoader.load_model START ============")
+        logger.info(f"----my_debug---- [load_model] od_config.model={od_config.model}")
+        logger.info(f"----my_debug---- [load_model] od_config.model_class_name={od_config.model_class_name}")
+        logger.info(f"----my_debug---- [load_model] od_config.dtype={od_config.dtype}")
+        logger.info(f"----my_debug---- [load_model] load_device={load_device}, load_format={load_format}")
+        logger.info(f"----my_debug---- [load_model] custom_pipeline_name={custom_pipeline_name}, device={device}")
+        logger.info(f"----my_debug---- [load_model] od_config.parallel_config.use_hsdp={od_config.parallel_config.use_hsdp}")
+
         if load_format is None:
             load_format = "default"
         self.od_config = od_config
         # CPU offload + FP8: load weights on device for FP8 quantization
         if load_device == "cpu" and od_config.quantization_config is not None:
             load_device = device.type
-            logger.info(f"Quantization enabled with CPU offload, using {load_device} for weight loading")
+            logger.info(f"----my_debug---- [load_model] Quantization enabled with CPU offload, using {load_device} for weight loading")
 
         target_device = torch.device(load_device)
+        logger.info(f"----my_debug---- [load_model] target_device={target_device}")
+        logger.info(f"----my_debug---- [load_model] set_default_torch_dtype to {od_config.dtype}")
+
         with set_default_torch_dtype(od_config.dtype):
             if od_config.parallel_config.use_hsdp:
+                logger.info("----my_debug---- [load_model] Using HSDP loading path")
                 model = self._load_model_with_hsdp(
                     od_config, target_device=device, load_format=load_format, custom_pipeline_name=custom_pipeline_name
                 )
             else:
                 with target_device:
                     if load_format == "default":
+                        logger.info("----my_debug---- [load_model] Calling initialize_model (default path)")
                         model = initialize_model(od_config)
+                        logger.info(f"----my_debug---- [load_model] Model initialized: {type(model).__name__}")
                     elif load_format == "diffusers":
+                        logger.info("----my_debug---- [load_model] Using DiffusersAdapterPipeline")
                         model = DiffusersAdapterPipeline(od_config=od_config, device=target_device)
                     elif load_format == "custom_pipeline":
                         from vllm_omni.diffusion.config import set_current_diffusion_config
 
+                        logger.info(f"----my_debug---- [load_model] Using custom_pipeline: {custom_pipeline_name}")
                         model_cls = resolve_obj_by_qualname(custom_pipeline_name)
                         with set_current_diffusion_config(od_config):
                             model = model_cls(od_config=od_config)
                     else:
                         raise ValueError(f"Unknown load_format: {load_format}")
-                logger.debug("Loading weights on %s ...", load_device)
+                logger.info(f"----my_debug---- [load_model] Loading weights on {load_device} ...")
                 if load_format == "diffusers":
                     # DiffusersAdapterPipeline.load_weights() calls
                     # DiffusionPipeline.from_pretrained() internally; it does
                     # not use our native customized pipeline classes.
                     cast(DiffusersAdapterPipeline, model).load_weights()
                 elif self._is_gguf_quantization(od_config):
+                    logger.info("----my_debug---- [load_model] Using GGUF quantization loading")
                     self._load_weights_with_gguf(model, od_config)
                 else:
                     # Quantization does not happen in `load_weights` but after it
@@ -340,8 +383,10 @@ class DiffusersPipelineLoader:
 
             # Process weights after loading for quantization (e.g., FP8 online quantization)
             # This is needed for vLLM's quantization methods that need to transform weights
+            logger.info("----my_debug---- [load_model] Processing weights after loading (quantization)")
             self._process_weights_after_loading(model, target_device)
 
+        logger.info("----my_debug---- [load_model] ============ DiffusersPipelineLoader.load_model END ============")
         return model.eval()
 
     def _process_weights_after_loading(self, model: nn.Module, target_device: torch.device) -> None:
@@ -368,7 +413,11 @@ class DiffusersPipelineLoader:
                     module.to(module_device)
 
     def load_weights(self, model: nn.Module) -> None:
+        logger.info("----my_debug---- [load_weights] Starting weights loading process")
         weights_to_load = self._get_expected_parameter_names(model)
+        logger.info(f"----my_debug---- [load_weights] Expected parameters to load: {len(weights_to_load)}")
+        logger.info(f"----my_debug---- [load_weights] Sample expected params (first 10): {list(weights_to_load)[:10]}")
+
         loaded_weights = model.load_weights(self.get_all_weights(model))
 
         self.counter_after_loading_weights = time.perf_counter()
@@ -376,21 +425,28 @@ class DiffusersPipelineLoader:
             "Loading weights took %.2f seconds",
             self.counter_after_loading_weights - self.counter_before_loading_weights,
         )
+        logger.info(f"----my_debug---- [load_weights] Weights loading took {self.counter_after_loading_weights - self.counter_before_loading_weights:.2f} seconds")
+
         # TODO(Isotr0py): Enable weights loading check after decoupling
         # all components' weights loading (AutoModel.from_pretrained etc).
         # We only enable strict check for non-quantized models
         # that have loaded weights tracking currently.
         if loaded_weights is not None:
+            logger.info(f"----my_debug---- [load_weights] Actually loaded weights: {len(loaded_weights)}")
             weights_not_loaded = weights_to_load - loaded_weights
+            logger.info(f"----my_debug---- [load_weights] Weights not loaded: {len(weights_not_loaded)}")
             # NOTE: if the model is quantized, ignore not_loaded check for scale weights
             weights_scale_not_loaded = {name for name in weights_not_loaded if name.endswith("weight_scale")}
             weights_not_loaded = weights_not_loaded - weights_scale_not_loaded
             if weights_not_loaded:
+                logger.info(f"----my_debug---- [load_weights] Sample weights not loaded (first 10): {list(weights_not_loaded)[:10]}")
                 self._check_unloaded_weights(weights_not_loaded)
             if weights_scale_not_loaded:
                 logger.warning(
                     f"Following weight_scale weights were not initialized from checkpoint: {weights_scale_not_loaded}"
                 )
+        else:
+            logger.info("----my_debug---- [load_weights] loaded_weights is None, skipping validation")
 
     @staticmethod
     def _is_expected_quantized_weight(name: str) -> bool:

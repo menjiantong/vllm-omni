@@ -53,6 +53,9 @@ from vllm_omni.worker.gpu_memory_utils import get_process_gpu_memory
 
 logger = init_logger(__name__)
 
+# ----my_debug---- Module loaded
+logger.info("----my_debug---- [diffusion_worker.py] Module loaded successfully")
+
 
 @dataclass
 class _DiffusionVllmModelConfig:
@@ -177,6 +180,13 @@ class DiffusionWorker:
         od_config: OmniDiffusionConfig,
         skip_load_model: bool = False,
     ):
+        logger.info("----my_debug---- [DiffusionWorker.__init__] ============ Worker Initialization START ============")
+        logger.info(f"----my_debug---- [DiffusionWorker.__init__] local_rank={local_rank}, rank={rank}")
+        logger.info(f"----my_debug---- [DiffusionWorker.__init__] od_config.model={od_config.model}")
+        logger.info(f"----my_debug---- [DiffusionWorker.__init__] od_config.model_class_name={od_config.model_class_name}")
+        logger.info(f"----my_debug---- [DiffusionWorker.__init__] od_config.num_gpus={od_config.num_gpus}")
+        logger.info(f"----my_debug---- [DiffusionWorker.__init__] skip_load_model={skip_load_model}")
+
         self.local_rank = local_rank
         self.rank = rank
         self.od_config = od_config
@@ -190,25 +200,35 @@ class DiffusionWorker:
         # requests, which only carry their sched_req_id in subsequent ticks.
         self._step_lora_state: dict[str, tuple[LoRARequest | None, float]] = {}
         self.stage_id = getattr(od_config, "stage_id", 0)
+
+        logger.info(f"----my_debug---- [DiffusionWorker.__init__] stage_id={self.stage_id}")
+        logger.info("----my_debug---- [DiffusionWorker.__init__] Calling init_device()...")
         self.init_device()
+
         # Create model runner using the platform-specified class
         model_runner_cls_path = current_omni_platform.get_diffusion_model_runner_cls()
+        logger.info(f"----my_debug---- [DiffusionWorker.__init__] model_runner_cls_path={model_runner_cls_path}")
         model_runner_cls = resolve_obj_by_qualname(model_runner_cls_path)
         self.model_runner = model_runner_cls(
             vllm_config=self.vllm_config,
             od_config=self.od_config,
             device=self.device,
         )
+        logger.info(f"----my_debug---- [DiffusionWorker.__init__] model_runner created: {type(self.model_runner).__name__}")
+
         self.profiler: WorkerProfiler | None = self._create_profiler()
         if not skip_load_model:
+            logger.info("----my_debug---- [DiffusionWorker.__init__] Loading model...")
             self.load_model(load_format=self.od_config.diffusion_load_format)
             self.init_lora_manager()
-        logger.info(f"Worker {self.rank}: Initialization complete.")
+        logger.info(f"----my_debug---- [DiffusionWorker.__init__] ============ Worker {self.rank} Initialization Complete ============")
 
     def init_device(self) -> None:
         """Initialize the device and distributed environment."""
+        logger.info("----my_debug---- [init_device] Initializing device and distributed environment")
         world_size = self.od_config.num_gpus
         rank = self.rank
+        logger.info(f"----my_debug---- [init_device] world_size={world_size}, rank={rank}")
 
         # Set environment variables for distributed initialization
         os.environ["MASTER_ADDR"] = "localhost"
@@ -216,10 +236,12 @@ class DiffusionWorker:
         os.environ["LOCAL_RANK"] = str(self.local_rank)
         os.environ["RANK"] = str(rank)
         os.environ["WORLD_SIZE"] = str(world_size)
+        logger.info(f"----my_debug---- [init_device] Environment vars set: MASTER_ADDR=localhost, MASTER_PORT={self.od_config.master_port}")
 
         # Setup device
         self.device = current_omni_platform.get_torch_device(rank)
         current_omni_platform.set_device(self.device)
+        logger.info(f"----my_debug---- [init_device] device={self.device}")
 
         # Create vllm_config for parallel configuration. Pass explicit device_config
         # so DeviceConfig does not rely on current_platform in worker subprocesses.
@@ -237,16 +259,21 @@ class DiffusionWorker:
             "Final IR op priority after setting vLLM-Omni overrides: %s", vllm_config.kernel_config.ir_op_priority
         )
         self.vllm_config = vllm_config
+        logger.info(f"----my_debug---- [init_device] vllm_config created")
+        logger.info(f"----my_debug---- [init_device] parallel_config.tensor_parallel_size={vllm_config.parallel_config.tensor_parallel_size}")
+        logger.info(f"----my_debug---- [init_device] parallel_config.data_parallel_size={vllm_config.parallel_config.data_parallel_size}")
 
         # Initialize distributed environment
         with (
             set_forward_context(vllm_config=self.vllm_config, omni_diffusion_config=self.od_config),
             set_current_vllm_config(self.vllm_config),
         ):
+            logger.info("----my_debug---- [init_device] Initializing distributed environment...")
             init_distributed_environment(world_size=world_size, rank=rank)
-            logger.info(f"Worker {self.rank}: Initialized device and distributed environment.")
+            logger.info(f"----my_debug---- [init_device] Worker {self.rank}: Initialized distributed environment.")
 
             parallel_config = self.od_config.parallel_config
+            logger.info(f"----my_debug---- [init_device] parallel_config: {parallel_config}")
             initialize_model_parallel(
                 data_parallel_size=parallel_config.data_parallel_size,
                 cfg_parallel_size=parallel_config.cfg_parallel_size,
@@ -259,7 +286,9 @@ class DiffusionWorker:
                 hsdp_replicate_size=parallel_config.hsdp_replicate_size if parallel_config.use_hsdp else 1,
                 enable_expert_parallel=parallel_config.enable_expert_parallel,
             )
+            logger.info("----my_debug---- [init_device] Model parallel initialized")
             init_workspace_manager(self.device)
+            logger.info("----my_debug---- [init_device] Workspace manager initialized")
 
     def _create_profiler(self) -> WorkerProfiler | None:
         profiler_config = self.od_config.profiler_config

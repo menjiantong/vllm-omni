@@ -19,6 +19,9 @@ from vllm_omni.platforms import current_omni_platform
 
 logger = init_logger(__name__)
 
+# ----my_debug---- Module loaded
+logger.info("----my_debug---- [registry.py] Module loaded successfully")
+
 _DIFFUSION_MODELS = {
     # arch:(mod_folder, mod_relname, cls_name)
     "QwenImagePipeline": (
@@ -323,14 +326,26 @@ def initialize_model(
     Raises:
         ValueError: If the model class is not found in the registry.
     """
+    logger.info("----my_debug---- [initialize_model] ============ Starting model initialization ============")
+    logger.info(f"----my_debug---- [initialize_model] od_config.model_class_name={od_config.model_class_name}")
+    logger.info(f"----my_debug---- [initialize_model] od_config.model={od_config.model}")
+    logger.info(f"----my_debug---- [initialize_model] od_config.dtype={od_config.dtype}")
+    logger.info(f"----my_debug---- [initialize_model] od_config.parallel_config={od_config.parallel_config}")
+
+    logger.info(f"----my_debug---- [initialize_model] Loading model class from registry...")
     model_class = DiffusionModelRegistry._try_load_model_cls(od_config.model_class_name)
+    logger.info(f"----my_debug---- [initialize_model] model_class={model_class}")
     if model_class is not None:
+        logger.info(f"----my_debug---- [initialize_model] Preparing diffusion quant config...")
         _prepare_diffusion_quant_config(od_config, model_class)
+        logger.info(f"----my_debug---- [initialize_model] Instantiating model with od_config...")
         with set_current_diffusion_config(od_config):
             model = model_class(od_config=od_config)
+        logger.info(f"----my_debug---- [initialize_model] Model instantiated: {type(model).__name__}")
 
         vae_pp_size = od_config.parallel_config.vae_patch_parallel_size
         is_distributed_vae = hasattr(model, "vae") and isinstance(model.vae, DistributedVaeMixin)
+        logger.info(f"----my_debug---- [initialize_model] vae_pp_size={vae_pp_size}, is_distributed_vae={is_distributed_vae}")
         if vae_pp_size > 1 and not is_distributed_vae:
             logger.warning(
                 "vae_patch_parallel_size=%d is set but VAE patch parallelism is NOT enabled for %s; ignoring.",
@@ -347,17 +362,22 @@ def initialize_model(
         # Configure VAE memory optimization settings from config
         if hasattr(model, "vae") and hasattr(model.vae, "use_slicing"):
             model.vae.use_slicing = od_config.vae_use_slicing
+            logger.info(f"----my_debug---- [initialize_model] VAE use_slicing={model.vae.use_slicing}")
         if hasattr(model, "vae") and hasattr(model.vae, "use_tiling"):
             model.vae.use_tiling = od_config.vae_use_tiling
+            logger.info(f"----my_debug---- [initialize_model] VAE use_tiling={model.vae.use_tiling}")
 
         if is_distributed_vae:
             model.vae.set_parallel_size(vae_pp_size)
+            logger.info(f"----my_debug---- [initialize_model] Distributed VAE parallel_size set to {vae_pp_size}")
 
         # Apply sequence parallelism if enabled
         # This follows diffusers' pattern where enable_parallelism() is called
         # at model loading time, not inside individual model files
+        logger.info("----my_debug---- [initialize_model] Applying sequence parallelism if enabled...")
         _apply_sequence_parallel_if_enabled(model, od_config)
 
+        logger.info("----my_debug---- [initialize_model] ============ Model initialization complete ============")
         return model
     else:
         raise ValueError(f"Model class {od_config.model_class_name} not found in diffusion model registry.")
