@@ -188,12 +188,20 @@ class OvisImageAttention(nn.Module):
 class OvisImageSingleTransformerBlock(nn.Module):
     def __init__(self, dim: int, num_attention_heads: int, attention_head_dim: int, mlp_ratio: float = 4.0):
         super().__init__()
+        logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.__init__] Initializing block: dim={dim}, num_attention_heads={num_attention_heads}, attention_head_dim={attention_head_dim}, mlp_ratio={mlp_ratio}")
+
         self.mlp_hidden_dim = int(dim * mlp_ratio)
+        logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.__init__] mlp_hidden_dim={self.mlp_hidden_dim}")
 
         self.norm = AdaLayerNormZeroSingle(dim)
+        logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.__init__] norm (AdaLayerNormZeroSingle) initialized with dim={dim}")
+
         self.proj_mlp = nn.Linear(dim, self.mlp_hidden_dim * 2)
+        logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.__init__] proj_mlp: in={dim}, out={self.mlp_hidden_dim * 2}")
+
         self.act_mlp = nn.SiLU()
         self.proj_out = nn.Linear(dim + self.mlp_hidden_dim, dim)
+        logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.__init__] proj_out: in={dim + self.mlp_hidden_dim}, out={dim}")
 
         self.attn = OvisImageAttention(
             query_dim=dim,
@@ -204,6 +212,7 @@ class OvisImageSingleTransformerBlock(nn.Module):
             eps=1e-6,
             pre_only=True,
         )
+        logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.__init__] Block initialization complete")
 
     def forward(
         self,
@@ -213,30 +222,48 @@ class OvisImageSingleTransformerBlock(nn.Module):
         image_rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
         joint_attention_kwargs: dict[str, Any] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.forward] hidden_states shape={hidden_states.shape}, dtype={hidden_states.dtype}")
+        logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.forward] encoder_hidden_states shape={encoder_hidden_states.shape}")
+        logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.forward] temb shape={temb.shape}")
+        if image_rotary_emb is not None:
+            logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.forward] image_rotary_emb: cos shape={image_rotary_emb[0].shape}, sin shape={image_rotary_emb[1].shape}")
+
         text_seq_len = encoder_hidden_states.shape[1]
         hidden_states = torch.cat([encoder_hidden_states, hidden_states], dim=1)
+        logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.forward] After concat: hidden_states shape={hidden_states.shape}, text_seq_len={text_seq_len}")
 
         residual = hidden_states
         norm_hidden_states, gate = self.norm(hidden_states, emb=temb)
+        logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.forward] norm_hidden_states shape={norm_hidden_states.shape}, gate shape={gate.shape}")
+
+        mlp_output = self.proj_mlp(norm_hidden_states)
         mlp_hidden_states, mlp_hidden_gate = torch.split(
-            self.proj_mlp(norm_hidden_states), [self.mlp_hidden_dim, self.mlp_hidden_dim], dim=-1
+            mlp_output, [self.mlp_hidden_dim, self.mlp_hidden_dim], dim=-1
         )
         mlp_hidden_states = self.act_mlp(mlp_hidden_gate) * mlp_hidden_states
+        logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.forward] mlp_hidden_states shape={mlp_hidden_states.shape}")
+
         joint_attention_kwargs = joint_attention_kwargs or {}
         attn_output = self.attn(
             hidden_states=norm_hidden_states,
             image_rotary_emb=image_rotary_emb,
             **joint_attention_kwargs,
         )
+        logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.forward] attn_output shape={attn_output.shape}")
 
         hidden_states = torch.cat([attn_output, mlp_hidden_states], dim=2)
+        logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.forward] After cat attn+mlp: hidden_states shape={hidden_states.shape}")
+
         gate = gate.unsqueeze(1)
         hidden_states = gate * self.proj_out(hidden_states)
+        logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.forward] After gated proj_out: hidden_states shape={hidden_states.shape}")
+
         hidden_states = residual + hidden_states
         if hidden_states.dtype == torch.float16:
             hidden_states = hidden_states.clip(-65504, 65504)
 
         encoder_hidden_states, hidden_states = hidden_states[:, :text_seq_len], hidden_states[:, text_seq_len:]
+        logger.info(f"----my_debug---- [OvisImageSingleTransformerBlock.forward] Output: encoder_hidden_states shape={encoder_hidden_states.shape}, hidden_states shape={hidden_states.shape}")
         return encoder_hidden_states, hidden_states
 
 
@@ -249,10 +276,15 @@ class OvisImageTransformerBlock(nn.Module):
         qk_norm: str = "rms_norm",
         eps: float = 1e-6,
     ):
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.__init__] Initializing block: dim={dim}, num_attention_heads={num_attention_heads}, attention_head_dim={attention_head_dim}, qk_norm={qk_norm}, eps={eps}")
+
         super().__init__()
 
         self.norm1 = AdaLayerNormZero(dim)
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.__init__] norm1 (AdaLayerNormZero) initialized with dim={dim}")
+
         self.norm1_context = AdaLayerNormZero(dim)
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.__init__] norm1_context (AdaLayerNormZero) initialized with dim={dim}")
 
         self.attn = OvisImageAttention(
             query_dim=dim,
@@ -264,12 +296,20 @@ class OvisImageTransformerBlock(nn.Module):
             bias=True,
             eps=eps,
         )
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.__init__] attn (OvisImageAttention) initialized")
 
         self.norm2 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.__init__] norm2 (LayerNorm) initialized with dim={dim}")
+
         self.ff = FeedForward(dim=dim, dim_out=dim, activation_fn="swiglu")
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.__init__] ff (FeedForward) initialized with dim={dim}, activation=swiglu")
 
         self.norm2_context = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.__init__] norm2_context (LayerNorm) initialized with dim={dim}")
+
         self.ff_context = FeedForward(dim=dim, dim_out=dim, activation_fn="swiglu")
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.__init__] ff_context (FeedForward) initialized with dim={dim}, activation=swiglu")
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.__init__] Block initialization complete")
 
     def forward(
         self,
@@ -279,13 +319,24 @@ class OvisImageTransformerBlock(nn.Module):
         image_rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
         joint_attention_kwargs: dict[str, Any] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.forward] hidden_states shape={hidden_states.shape}, dtype={hidden_states.dtype}")
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.forward] encoder_hidden_states shape={encoder_hidden_states.shape}")
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.forward] temb shape={temb.shape}")
+        if image_rotary_emb is not None:
+            logger.info(f"----my_debug---- [OvisImageTransformerBlock.forward] image_rotary_emb: cos shape={image_rotary_emb[0].shape}, sin shape={image_rotary_emb[1].shape}")
+
         norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(hidden_states, emb=temb)
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.forward] norm1 output: norm_hidden_states shape={norm_hidden_states.shape}, gate_msa shape={gate_msa.shape}")
+
         norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp = self.norm1_context(
             encoder_hidden_states, emb=temb
         )
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.forward] norm1_context output: norm_encoder_hidden_states shape={norm_encoder_hidden_states.shape}")
+
         joint_attention_kwargs = joint_attention_kwargs or {}
 
         # Attention.
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.forward] Running attention...")
         attention_outputs = self.attn(
             hidden_states=norm_hidden_states,
             encoder_hidden_states=norm_encoder_hidden_states,
@@ -297,50 +348,68 @@ class OvisImageTransformerBlock(nn.Module):
             attn_output, context_attn_output = attention_outputs
         elif len(attention_outputs) == 3:
             attn_output, context_attn_output, ip_attn_output = attention_outputs
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.forward] attn_output shape={attn_output.shape}, context_attn_output shape={context_attn_output.shape}")
 
         # Process attention outputs for the `hidden_states`.
         attn_output = gate_msa.unsqueeze(1) * attn_output
         hidden_states = hidden_states + attn_output
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.forward] After attention residual: hidden_states shape={hidden_states.shape}")
 
         norm_hidden_states = self.norm2(hidden_states)
         norm_hidden_states = norm_hidden_states * (1 + scale_mlp[:, None]) + shift_mlp[:, None]
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.forward] norm_hidden_states shape after norm2={norm_hidden_states.shape}")
 
         ff_output = self.ff(norm_hidden_states)
         ff_output = gate_mlp.unsqueeze(1) * ff_output
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.forward] ff_output shape={ff_output.shape}")
 
         hidden_states = hidden_states + ff_output
         if len(attention_outputs) == 3:
             hidden_states = hidden_states + ip_attn_output
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.forward] After ff residual: hidden_states shape={hidden_states.shape}")
 
         # Process attention outputs for the `encoder_hidden_states`.
         context_attn_output = c_gate_msa.unsqueeze(1) * context_attn_output
         encoder_hidden_states = encoder_hidden_states + context_attn_output
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.forward] After attention residual (encoder): encoder_hidden_states shape={encoder_hidden_states.shape}")
 
         norm_encoder_hidden_states = self.norm2_context(encoder_hidden_states)
         norm_encoder_hidden_states = norm_encoder_hidden_states * (1 + c_scale_mlp[:, None]) + c_shift_mlp[:, None]
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.forward] norm_encoder_hidden_states shape after norm2_context={norm_encoder_hidden_states.shape}")
 
         context_ff_output = self.ff_context(norm_encoder_hidden_states)
         encoder_hidden_states = encoder_hidden_states + c_gate_mlp.unsqueeze(1) * context_ff_output
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.forward] After ff_context residual: encoder_hidden_states shape={encoder_hidden_states.shape}")
+
         if encoder_hidden_states.dtype == torch.float16:
             encoder_hidden_states = encoder_hidden_states.clip(-65504, 65504)
 
+        logger.info(f"----my_debug---- [OvisImageTransformerBlock.forward] Output: encoder_hidden_states shape={encoder_hidden_states.shape}, hidden_states shape={hidden_states.shape}")
         return encoder_hidden_states, hidden_states
 
 
 class OvisImagePosEmbed(nn.Module):
     def __init__(self, theta: int, axes_dim: list[int]):
+        logger.info(f"----my_debug---- [OvisImagePosEmbed.__init__] theta={theta}, axes_dim={axes_dim}")
+
         super().__init__()
         self.theta = theta
         self.axes_dim = axes_dim
+        logger.info(f"----my_debug---- [OvisImagePosEmbed.__init__] PosEmbed initialization complete")
 
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
+        logger.info(f"----my_debug---- [OvisImagePosEmbed.forward] ids shape={ids.shape}, dtype={ids.dtype}")
         n_axes = ids.shape[-1]
+        logger.info(f"----my_debug---- [OvisImagePosEmbed.forward] n_axes={n_axes}")
+
         cos_out = []
         sin_out = []
         pos = ids.float()
         is_mps = ids.device.type == "mps"
         is_npu = ids.device.type == "npu"
         freqs_dtype = torch.float32 if (is_mps or is_npu) else torch.float64
+        logger.info(f"----my_debug---- [OvisImagePosEmbed.forward] freqs_dtype={freqs_dtype}, device={ids.device}")
+
         for i in range(n_axes):
             freqs_cis = get_1d_rotary_pos_embed(
                 self.axes_dim[i],
@@ -351,8 +420,16 @@ class OvisImagePosEmbed(nn.Module):
             )
             cos_out.append(freqs_cis.real)
             sin_out.append(freqs_cis.imag)
+            logger.info(f"----my_debug---- [OvisImagePosEmbed.forward] Axis {i}: axes_dim={self.axes_dim[i]}, freqs_cis shape={freqs_cis.shape}")
+
+        logger.info(f"----my_debug---- [OvisImagePosEmbed.forward] cos_out list length={len(cos_out)}, each shape={[c.shape for c in cos_out]}")
+        logger.info(f"----my_debug---- [OvisImagePosEmbed.forward] sin_out list length={len(sin_out)}, each shape={[s.shape for s in sin_out]}")
+
         freqs_cos = torch.cat(cos_out, dim=-1).to(ids.device)
         freqs_sin = torch.cat(sin_out, dim=-1).to(ids.device)
+        logger.info(f"----my_debug---- [OvisImagePosEmbed.forward] freqs_cos shape={freqs_cos.shape}, dtype={freqs_cos.dtype}")
+        logger.info(f"----my_debug---- [OvisImagePosEmbed.forward] freqs_sin shape={freqs_sin.shape}, dtype={freqs_sin.dtype}")
+
         return freqs_cos, freqs_sin
 
 
