@@ -656,6 +656,16 @@ class OvisImageTransformer2DModel(nn.Module):
         # Expose packed shard mappings for LoRA handling of fused projections.
         self.stacked_params_mapping = stacked_params_mapping
 
+        # FeedForward weight mapping: diffusers format -> new format
+        # diffusers: net.0.proj.weight -> linear_in.weight
+        # diffusers: net.2.weight -> linear_out.weight
+        ff_weight_mapping = [
+            ("ff.net.0.proj", "ff.linear_in"),
+            ("ff.net.2", "ff.linear_out"),
+            ("ff_context.net.0.proj", "ff_context.linear_in"),
+            ("ff_context.net.2", "ff_context.linear_out"),
+        ]
+
         params_dict = dict(self.named_parameters())
 
         # we need to load the buffers for beta and eps (XIELU)
@@ -665,15 +675,25 @@ class OvisImageTransformer2DModel(nn.Module):
 
         loaded_params: set[str] = set()
         for name, loaded_weight in weights:
+            # Handle FeedForward weight mapping
+            for old_prefix, new_prefix in ff_weight_mapping:
+                if old_prefix in name:
+                    name = name.replace(old_prefix, new_prefix)
+                    break
+
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)
+                if name not in params_dict:
+                    break
                 param = params_dict[name]
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
+                if name not in params_dict:
+                    continue
                 param = params_dict[name]
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
