@@ -331,9 +331,8 @@ class OvisImageSingleTransformerBlock(nn.Module):
 
         residual = hidden_states
         norm_hidden_states, gate = self.norm(hidden_states, emb=temb)
-        mlp_output = self.proj_mlp(norm_hidden_states)
-        mlp_hidden_states, mlp_hidden_gate = mlp_output.split(
-            [self.mlp_hidden_dim, self.mlp_hidden_dim], dim=-1
+        mlp_hidden_states, mlp_hidden_gate = torch.split(
+            self.proj_mlp(norm_hidden_states), [self.mlp_hidden_dim, self.mlp_hidden_dim], dim=-1
         )
         mlp_hidden_states = self.act_mlp(mlp_hidden_gate) * mlp_hidden_states
         joint_attention_kwargs = joint_attention_kwargs or {}
@@ -345,8 +344,7 @@ class OvisImageSingleTransformerBlock(nn.Module):
 
         hidden_states = torch.cat([attn_output, mlp_hidden_states], dim=2)
         gate = gate.unsqueeze(1)
-        hidden_states = self.proj_out(hidden_states)
-        hidden_states = gate * hidden_states
+        hidden_states = gate * self.proj_out(hidden_states)
         hidden_states = residual + hidden_states
         if hidden_states.dtype == torch.float16:
             hidden_states = hidden_states.clip(-65504, 65504)
