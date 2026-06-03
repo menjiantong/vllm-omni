@@ -249,7 +249,7 @@ class OvisImageAttention(nn.Module):
             )
             hidden_states = self.to_out[0](hidden_states)
             hidden_states = self.to_out[1](hidden_states)
-            encoder_hidden_states, _ = self.to_add_out(encoder_hidden_states)
+            encoder_hidden_states = self.to_add_out(encoder_hidden_states)
 
             return hidden_states, encoder_hidden_states
         else:
