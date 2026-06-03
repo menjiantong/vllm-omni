@@ -268,7 +268,7 @@ outputs = omni.generate("a cat")
 ```python
 class Omni(OmniBase):
     """同步离线生成的入口类"""
-
+    
     # Omni 继承自 OmniBase，主要逻辑在 OmniBase.__init__() 中
 ```
 
@@ -283,7 +283,7 @@ class OmniBase:
         # 1. 下载模型（如果需要）
         model = omni_snapshot_download(model)
         self.model = model
-
+        
         # 2. 创建异步引擎
         self.engine = AsyncOmniEngine(
             model=model,
@@ -291,7 +291,7 @@ class OmniBase:
         )
 ```
 
-**作用**:
+**作用**: 
 - `omni_snapshot_download()`: 检查模型是否已缓存，未缓存则从 HuggingFace 下载
 - `AsyncOmniEngine`: 创建多阶段推理引擎
 
@@ -313,12 +313,12 @@ class AsyncOmniEngine:
         **kwargs,
     ):
         self.model = model
-
+        
         # ========== 非量化步骤 ==========
         # 1. 解析阶段配置
         self.config_path, self.stage_configs = self._resolve_stage_configs(model, kwargs)
         self.num_stages = len(self.stage_configs)
-
+        
         # 2. 启动编排器线程
         self.orchestrator_thread = threading.Thread(
             target=self._bootstrap_orchestrator,
@@ -326,7 +326,7 @@ class AsyncOmniEngine:
             daemon=True,
         )
         self.orchestrator_thread.start()
-
+        
         # 3. 等待初始化完成
         self._wait_for_orchestrator_init(startup_future, startup_timeout)
 ```
@@ -349,21 +349,21 @@ def initialize_diffusion_stage(
     batch_size: int = 1,
 ) -> Any:
     """初始化扩散阶段"""
-
+    
     # ========== 非量化步骤 ==========
     # 1. 构建配置
     engine_args = _to_dict(stage_cfg.engine_args)
-
+    
     # ========== 进入配置构建（下一阶段）==========
     od_config = OmniDiffusionConfig.from_kwargs(
         stage_id=stage_id,
         model=model,
         **engine_args,  # quantization="fp8" 在这里
     )
-
+    
     # 2. 完整配置构建
     od_config = build_diffusion_config(model, stage_cfg, metadata)
-
+    
     # 3. 创建 Diffusion Client
     return create_diffusion_client(model, od_config, metadata, ...)
 ```
@@ -383,28 +383,28 @@ def initialize_diffusion_stage(
 ```python
 class OmniDiffusionConfig:
     quantization_config: str | QuantizationConfig | dict | None = None
-
+    
     @classmethod
     def from_kwargs(cls, **kwargs) -> "OmniDiffusionConfig":
         # ========== 非量化步骤：参数兼容性处理 ==========
         # 向后兼容：quantization → quantization_config
         if "quantization" in kwargs and kwargs.get("quantization_config") is None:
             kwargs["quantization_config"] = kwargs.pop("quantization")
-
+        
         # 过滤无效字段
         valid_fields = {f.name for f in fields(cls)}
         filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_fields}
-
+        
         # 创建配置对象
         config = cls(**filtered_kwargs)
-
+        
         # ========== 量化核心：解析量化配置 ==========
         # 在 __post_init__ 中处理
         return config
-
+    
     def __post_init__(self):
         # ... 其他初始化 ...
-
+        
         # ========== 量化核心步骤 ==========
         # 解析 quantization_config
         if self.quantization_config is not None:
@@ -431,7 +431,7 @@ def build_quant_config(
     **kwargs,
 ) -> QuantizationConfig | None:
     """构建量化配置
-
+    
     支持格式:
     - "fp8"                          # 字符串
     - {"method": "fp8"}              # 字典
@@ -440,13 +440,13 @@ def build_quant_config(
     """
     if spec is None:
         return None
-
+    
     if isinstance(spec, QuantizationConfig):
         return spec  # 已经是配置对象，直接返回
-
+    
     if isinstance(spec, str):
         return _build_single(spec, **kwargs)
-
+    
     if isinstance(spec, Mapping):
         # 检查是否为组件级配置
         if _is_per_component_dict(spec):
@@ -458,14 +458,14 @@ def build_quant_config(
 def _build_single(method: str, **kwargs) -> QuantizationConfig:
     """构建单个量化配置"""
     method = method.lower()
-
+    
     # 检查是否有自定义覆盖
     if method in _OVERRIDES:
         return _OVERRIDES[method](**kwargs)
-
+    
     # FP8 使用 vLLM 的配置类
     config_cls = get_quantization_config(method)
-
+    
     # ========== 量化核心：创建 Fp8Config ==========
     return config_cls(**kwargs)
 ```
@@ -481,7 +481,7 @@ def _build_single(method: str, **kwargs) -> QuantizationConfig:
 ```python
 class Fp8Config(QuantizationConfig):
     """FP8 量化配置"""
-
+    
     def __init__(
         self,
         is_checkpoint_fp8_serialized: bool = False,  # 是否预量化检查点
@@ -493,21 +493,21 @@ class Fp8Config(QuantizationConfig):
         self.activation_scheme = activation_scheme
         self.ignored_layers = ignored_layers or []
         self.weight_block_size = weight_block_size
-
+    
     # ========== 量化核心方法 ==========
     def get_quant_method(
-        self,
-        layer: torch.nn.Module,
+        self, 
+        layer: torch.nn.Module, 
         prefix: str
     ) -> QuantizeMethodBase | None:
         """为指定层分配合适的量化方法
-
+        
         这是连接配置和实际量化的桥梁！
-
+        
         参数:
             layer: 当前层对象（LinearBase 或 FusedMoE）
             prefix: 层路径，如 "transformer.blocks.0.attn.to_qkv"
-
+        
         返回:
             量化方法对象，或 None（不量化）
         """
@@ -515,7 +515,7 @@ class Fp8Config(QuantizationConfig):
             # 检查是否跳过该层
             if is_layer_skipped(prefix, self.ignored_layers):
                 return UnquantizedLinearMethod()
-
+            
             # 根据检查点类型选择方法
             if not self.is_checkpoint_fp8_serialized:
                 # 在线量化：BF16 → FP8
@@ -523,14 +523,14 @@ class Fp8Config(QuantizationConfig):
             else:
                 # 离线量化：已经是 FP8
                 return Fp8LinearMethod(self)
-
+        
         elif isinstance(layer, FusedMoE):
             # MoE 专家层量化
             if self.is_checkpoint_fp8_serialized:
                 return Fp8MoEMethod(self, layer)
             else:
                 return Fp8OnlineMoEMethod(self, layer)
-
+        
         return None  # 不支持量化的层
 ```
 
@@ -556,14 +556,14 @@ class DiffusionModelRunner:
         self.od_config = od_config  # 包含 quantization_config
         self.device = device
         self.pipeline = None
-
+    
     def load_model(self, ...):
         # 创建模型加载器
         model_loader = DiffusersPipelineLoader(
-            load_config,
+            load_config, 
             od_config=self.od_config
         )
-
+        
         # ========== 加载模型（进入下一阶段）==========
         self.pipeline = model_loader.load_model(
             od_config=self.od_config,
@@ -582,21 +582,21 @@ class DiffusionModelRunner:
 class DiffusersPipelineLoader:
     def load_model(self, od_config, load_device, ...):
         target_device = torch.device(load_device)
-
+        
         with set_default_torch_dtype(od_config.dtype):
             # ========== 非量化步骤 ==========
             # 检查 HSDP 配置
-
+            
             # ========== 量化关键：初始化模型 ==========
             model = initialize_model(od_config)
-
+            
             # ========== 非量化步骤 ==========
             # 加载权重
             self.load_weights(model)
-
+            
             # ========== 量化关键：处理权重 ==========
             self._process_weights_after_loading(model, target_device)
-
+        
         return model.eval()
 ```
 
@@ -610,21 +610,21 @@ class DiffusersPipelineLoader:
 ```python
 def initialize_model(od_config: OmniDiffusionConfig) -> nn.Module:
     """初始化扩散模型"""
-
+    
     # 从注册表获取模型类
     model_class = DiffusionModelRegistry._try_load_model_cls(
         od_config.model_class_name
     )
-
+    
     if model_class is not None:
         # ========== 量化关键：准备量化配置 ==========
         _prepare_diffusion_quant_config(od_config, model_class)
-
+        
         # ========== 实例化模型 ==========
         model = model_class(od_config=od_config)
-
+        
         # ... 其他初始化 ...
-
+        
         return model
 
 
@@ -636,16 +636,16 @@ def _prepare_diffusion_quant_config(
     quant_config = od_config.quantization_config
     if quant_config is None:
         return
-
+    
     # 更新配置（如果需要）
     if hasattr(quant_config, "maybe_update_config"):
         quant_config.maybe_update_config(od_config.model)
-
+    
     # 注入 packed_modules_mapping（用于 QKV 融合层）
     diffusion_packed_modules_mapping = current_omni_platform.get_diffusion_packed_modules_mapping(model_class)
     if diffusion_packed_modules_mapping is not None:
         model_class.packed_modules_mapping = diffusion_packed_modules_mapping
-
+    
     # vLLM 配置函数
     configure_quant_config(quant_config, model_class)
 ```
@@ -664,10 +664,10 @@ class Flux2KleinPipeline:
         # ========== 非量化步骤 ==========
         # 初始化 text_encoder (T5)
         self.text_encoder = ...
-
+        
         # 初始化 VAE
         self.vae = ...
-
+        
         # ========== 量化关键：初始化 Transformer ==========
         self.transformer = Flux2KleinTransformer2DModel(
             quant_config=od_config.quantization_config,  # Fp8Config
@@ -710,7 +710,7 @@ class LinearBase(PluggableLayer):
     ):
         self.quant_config = quant_config
         self.prefix = prefix
-
+        
         # ========== 量化核心：获取量化方法 ==========
         if quant_config is None:
             self.quant_method = UnquantizedLinearMethod()
@@ -718,7 +718,7 @@ class LinearBase(PluggableLayer):
             # 调用 Fp8Config.get_quant_method()
             # 返回 Fp8OnlineLinearMethod 实例
             self.quant_method = quant_config.get_quant_method(self, prefix)
-
+        
         # 创建权重占位符
         self.quant_method.create_weights(self, ...)
 ```
@@ -734,7 +734,7 @@ class LinearBase(PluggableLayer):
 ```python
 class Fp8OnlineLinearMethod(Fp8LinearMethod):
     uses_meta_device: bool = True  # 支持延迟加载
-
+    
     def create_weights(
         self,
         layer: torch.nn.Module,
@@ -746,16 +746,16 @@ class Fp8OnlineLinearMethod(Fp8LinearMethod):
         **extra_weight_attrs,
     ):
         """创建 FP8 权重占位符"""
-
+        
         output_size_per_partition = sum(output_partition_sizes)
-
+        
         # 保存元信息
         layer.logical_widths = output_partition_sizes
         layer.input_size_per_partition = input_size_per_partition
         layer.output_size_per_partition = output_size_per_partition
         layer.orig_dtype = params_dtype  # BF16
         layer.weight_block_size = None
-
+        
         # ========== 创建权重占位符（meta device）==========
         weight = ModelWeightParameter(
             data=torch.empty(
@@ -769,7 +769,7 @@ class Fp8OnlineLinearMethod(Fp8LinearMethod):
             weight_loader=weight_loader,
         )
         layer.register_parameter("weight", weight)
-
+        
         # 设置延迟处理标志
         initialize_online_processing(layer)
 ```
@@ -789,14 +789,14 @@ class Fp8OnlineLinearMethod(Fp8LinearMethod):
 ```python
 def load_weights(self, model: nn.Module) -> None:
     """加载模型权重"""
-
+    
     # 获取需要加载的权重名
     weights_to_load = self._get_expected_parameter_names(model)
-
+    
     # ========== 非量化步骤 ==========
     # 从 HuggingFace 加载权重
     loaded_weights = model.load_weights(self.get_all_weights(model))
-
+    
     # 此时，layer.weight 是 BF16 权重
 ```
 
@@ -808,28 +808,28 @@ def load_weights(self, model: nn.Module) -> None:
 
 ```python
 def _process_weights_after_loading(
-    self,
-    model: nn.Module,
+    self, 
+    model: nn.Module, 
     target_device: torch.device
 ) -> None:
     """权重加载后处理（量化）"""
-
+    
     for name, module in model.named_modules():
         quant_method = getattr(module, "quant_method", None)
-
+        
         if isinstance(quant_method, QuantizeMethodBase):
             # 移动到目标设备
             module_device = next(module.parameters(), None)
             if module_device is not None:
                 module_device = module_device.device
             needs_device_move = module_device != target_device
-
+            
             if needs_device_move:
                 module.to(target_device)
-
+            
             # ========== 量化核心：执行量化 ==========
             quant_method.process_weights_after_loading(module)
-
+            
             if needs_device_move:
                 module.to(module_device)
 ```
@@ -842,22 +842,22 @@ def _process_weights_after_loading(
 
 ```python
 class Fp8OnlineLinearMethod(Fp8LinearMethod):
-
+    
     def process_weights_after_loading(self, layer: Module) -> None:
         """执行 FP8 量化
-
+        
         这是量化的核心步骤！
-
+        
         输入: layer.weight (BF16)
         输出: layer.weight (FP8) + layer.weight_scale
         """
         # 防止重复处理
         if getattr(layer, "_already_called_process_weights_after_loading", False):
             return
-
+        
         assert not self.block_quant  # 在线量化不支持块量化
         layer.input_scale = None
-
+        
         # ========== 量化核心：调用 CUDA kernel ==========
         qweight, weight_scale = ops.scaled_fp8_quant(
             layer.weight,  # BF16 输入
@@ -865,15 +865,15 @@ class Fp8OnlineLinearMethod(Fp8LinearMethod):
         )
         # qweight: torch.float8_e4m3fn
         # weight_scale: torch.float32 标量
-
+        
         # 替换权重
         replace_parameter(layer, "weight", qweight.data)
         replace_parameter(layer, "weight_scale", weight_scale.data)
-
+        
         # 转置权重以适配 kernel
         weight = qweight.t()
         replace_parameter(layer, "weight", weight.data)
-
+        
         # 标记已处理
         layer._already_called_process_weights_after_loading = True
 ```
@@ -939,7 +939,7 @@ class Flux2KleinTransformer2DModel:
                 encoder_hidden_states,
                 ...
             )
-
+        
         return hidden_states
 ```
 
@@ -951,14 +951,14 @@ class Flux2KleinBlock:
         # Self-Attention
         # ========== 量化关键：to_qkv 是 Linear 层 ==========
         q, k, v = self.attn.to_qkv(hidden_states).chunk(3, dim=-1)
-
+        
         attn_output = attention(q, k, v)
         hidden_states = self.attn.to_out(attn_output)  # 量化
-
+        
         # MLP
         # ========== 量化关键：ff 是 MLP 层 ==========
         hidden_states = self.ff(hidden_states)  # 量化
-
+        
         return hidden_states
 ```
 
@@ -985,25 +985,25 @@ class Fp8LinearMethod(LinearMethodBase):
             activation_key = kFp8DynamicTokenSym
         else:
             activation_key = kFp8DynamicTensorSym
-
+        
         self.fp8_linear = init_fp8_linear_kernel(
             activation_quant_key=activation_key,
             weight_quant_key=kFp8StaticTensorSym,
             out_dtype=torch.bfloat16,
         )
-
+    
     def apply(self, layer, x, bias=None):
         """执行 FP8 线性层计算
-
+        
         y = (x @ W_fp8.T) * scale_x * scale_w + bias
-
+        
         参数:
             layer: 包含 FP8 权重的层
                 - layer.weight: FP8 权重 (转置后)
                 - layer.weight_scale: 权重 scale
             x: 输入 (BF16)
             bias: 偏置
-
+        
         返回:
             输出 (BF16)
         """
@@ -1058,7 +1058,7 @@ def scaled_fp8_quant(
     scale: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """FP8 量化的 CUDA 实现
-
+    
     数学:
         scale = max(|weight|) / 448.0
         weight_fp8 = round(weight / scale).clamp(-448, 447)
@@ -1067,11 +1067,11 @@ def scaled_fp8_quant(
     if scale is None:
         # 并行计算最大绝对值
         scale = weight.abs().max() / 448.0
-
+    
     # 并行量化
     quantized = (weight / scale).round().clamp(-448, 447)
     quantized = quantized.to(torch.float8_e4m3fn)
-
+    
     return quantized, scale
 ```
 
@@ -1084,12 +1084,12 @@ def init_fp8_linear_kernel(
     out_dtype: torch.dtype,
 ) -> LinearKernel:
     """根据硬件选择 kernel"""
-
+    
     # 量化类型
     # - kFp8DynamicTokenSym: Per-token 动态量化（推荐）
     # - kFp8DynamicTensorSym: Per-tensor 动态量化
     # - kFp8StaticTensorSym: 静态量化
-
+    
     if cutlass_fp8_supported():
         # Ada/Hopper: 原生 FP8
         return CutlassFp8LinearKernel(...)

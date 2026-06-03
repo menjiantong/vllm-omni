@@ -1,5 +1,5 @@
 
-## Community Recipes To-Do List
+## Community Recipes To-Do List 
 
 The initial `recipes/` template has been merged #2646. We now welcome community contributions for practical “run model X on hardware Y for task Z” recipes in `vllm-omni`.
 

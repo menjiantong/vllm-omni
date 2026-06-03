@@ -1,0 +1,466 @@
+es)
+Uninstalled 1 package in 0.75ms
+Installed 1 package in 4ms
+ - vllm-omni==0.20.1.dev156+ge07469172 (from file:///root/vo/vllm-omni)
+ + vllm-omni==0.20.1.dev153+g9048424fe (from file:///root/vo/vllm-omni)
+(vo) root@gpuhub-container-745c4fabbd-93239127:~/vo/vllm-omni# python examples/offline_inference/text_to_image/text_to_image.py --model AIDC-AI/Ovis-Image-7B  --prompt "a cup of coffee on the table" --output coffee.png
+/root/vo/vllm-omni/vllm_omni/version.py:55: RuntimeWarning: vLLM and vLLM-Omni appear to have mismatched major/minor versions:
+ --> vLLM-Omni version 0.20.1.dev153+g9048424fe
+ --> vLLM version 0.21.0
+This will likely cause compatibility issues.
+  warn_if_misaligned_vllm_version()
+INFO 05-21 01:25:30 [weight_utils.py:50] Using model weights format ['*']
+INFO 05-21 01:25:30 [omni_base.py:172] [Omni] Initializing with model AIDC-AI/Ovis-Image-7B
+INFO 05-21 01:25:30 [async_omni_engine.py:276] [AsyncOmniEngine] Initializing with model AIDC-AI/Ovis-Image-7B
+[transformers] `Siglip2ImageProcessorFast` is deprecated. The `Fast` suffix for image processors has been removed; use `Siglip2ImageProcessor` instead.
+Failed to get device capability: SM 12.x requires CUDA >= 12.9.
+Failed to get device capability: SM 12.x requires CUDA >= 12.9.
+INFO 05-21 01:25:33 [async_omni_engine.py:360] [AsyncOmniEngine] Launching Orchestrator thread with 1 stages
+INFO 05-21 01:25:33 [stage_init_utils.py:464] [stage_init] Set VLLM_WORKER_MULTIPROC_METHOD=spawn
+INFO 05-21 01:25:33 [stage_init_utils.py:631] [stage_init] Stage-0 set runtime devices: 0
+WARNING 05-21 01:25:33 [data.py:680] ----my_debug--- [OmniDiffusionConfig.__post_init__] START
+WARNING 05-21 01:25:33 [data.py:681] ----my_debug--- [OmniDiffusionConfig] model=AIDC-AI/Ovis-Image-7B, model_class_name=None
+WARNING 05-21 01:25:33 [data.py:682] ----my_debug--- [OmniDiffusionConfig] dtype before conversion: auto (type=<class 'str'>)
+WARNING 05-21 01:25:33 [data.py:701] ----my_debug--- [OmniDiffusionConfig] dtype after conversion: torch.bfloat16
+WARNING 05-21 01:25:33 [data.py:702] ----my_debug--- [OmniDiffusionConfig] quantization_config=None
+WARNING 05-21 01:25:33 [data.py:703] ----my_debug--- [OmniDiffusionConfig.__post_init__] END
+INFO 05-21 01:25:33 [weight_utils.py:50] Using model weights format ['*']
+INFO 05-21 01:25:33 [multiproc_executor.py:138] Starting server...
+/root/vo/vllm-omni/vllm_omni/version.py:55: RuntimeWarning: vLLM and vLLM-Omni appear to have mismatched major/minor versions:
+ --> vLLM-Omni version 0.20.1.dev153+g9048424fe
+ --> vLLM version 0.21.0
+This will likely cause compatibility issues.
+  warn_if_misaligned_vllm_version()
+INFO 05-21 01:25:40 [diffusion_worker.py:680] Worker 0 created result MessageQueue
+INFO 05-21 01:25:41 [scheduler.py:239] Chunked prefill is enabled with max_num_batched_tokens=2048.
+INFO 05-21 01:25:41 [vllm.py:886] Asynchronous scheduling is enabled.
+INFO 05-21 01:25:41 [kernel.py:212] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+INFO 05-21 01:25:41 [diffusion_worker.py:236] Final IR op priority after setting vLLM-Omni overrides: IrOpPriorityConfig(rms_norm=['vllm_c', 'native'], fused_add_rms_norm=['vllm_c', 'native'])
+INFO 05-21 01:25:41 [diffusion_worker.py:247] Worker 0: Initialized device and distributed environment.
+INFO 05-21 01:25:41 [parallel_state.py:588] Building SP subgroups from explicit sp_group_ranks (sp_size=1, ulysses=1, ring=1, use_ulysses_low=True).
+INFO 05-21 01:25:41 [parallel_state.py:630] SP group details for rank 0: sp_group=[0], ulysses_group=[0], ring_group=[0]
+WARNING 05-21 01:25:41 [diffusers_loader.py:306] ----my_debug--- ===== load_model START =====
+WARNING 05-21 01:25:41 [diffusers_loader.py:307] ----my_debug--- [diffusers_loader] od_config.dtype=torch.bfloat16
+WARNING 05-21 01:25:41 [diffusers_loader.py:308] ----my_debug--- [diffusers_loader] od_config.model=AIDC-AI/Ovis-Image-7B
+WARNING 05-21 01:25:41 [diffusers_loader.py:309] ----my_debug--- [diffusers_loader] od_config.model_class_name=OvisImagePipeline
+WARNING 05-21 01:25:41 [diffusers_loader.py:310] ----my_debug--- [diffusers_loader] od_config.quantization_config=None
+WARNING 05-21 01:25:41 [diffusers_loader.py:311] ----my_debug--- [diffusers_loader] load_device=cuda:0, load_format=default
+WARNING 05-21 01:25:41 [diffusers_loader.py:313] ----my_debug--- [diffusers_loader] tf_model_config.params={'_class_name': 'OvisImageTransformer2DModel', '_diffusers_version': '0.36.0.dev0', 'attention_head_dim': 128, 'axes_dims_rope': [16, 56, 56], 'in_channels': 64, 'joint_attention_dim': 2048, 'num_attention_heads': 24, 'num_layers': 6, 'num_single_layers': 27, 'out_channels': None, 'patch_size': 1}
+WARNING 05-21 01:25:41 [diffusers_loader.py:322] ----my_debug--- [diffusers_loader] set_default_torch_dtype to torch.bfloat16
+WARNING 05-21 01:25:41 [diffusers_loader.py:323] ----my_debug--- [diffusers_loader] target_device=cuda:0
+WARNING 05-21 01:25:41 [diffusers_loader.py:333] ----my_debug--- [diffusers_loader] Calling initialize_model(od_config)...
+Failed to get device capability: SM 12.x requires CUDA >= 12.9.
+Failed to get device capability: SM 12.x requires CUDA >= 12.9.
+WARNING 05-21 01:25:41 [pipeline_ovis_image.py:153] ----my_debug--- [OvisImagePipeline.__init__] START
+WARNING 05-21 01:25:41 [pipeline_ovis_image.py:154] ----my_debug--- [OvisImagePipeline] od_config.dtype=torch.bfloat16, od_config.model=AIDC-AI/Ovis-Image-7B
+WARNING 05-21 01:25:41 [pipeline_ovis_image.py:155] ----my_debug--- [OvisImagePipeline] od_config.quantization_config=None
+/root/vo/.venv/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+WARNING 05-21 01:25:43 [pipeline_ovis_image.py:177] ----my_debug--- [OvisImagePipeline] Loading text_encoder...
+Fetching 2 files: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00, 21564.54it/s]
+Download complete: : 0.00B [00:00, ?B/s]                                                                                                                                                                | 0/2 [00:00<?, ?it/s]
+Loading weights: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 310/310 [00:01<00:00, 157.75it/s]
+WARNING 05-21 01:25:47 [pipeline_ovis_image.py:181] ----my_debug--- [OvisImagePipeline] text_encoder loaded, dtype=torch.float32
+WARNING 05-21 01:25:47 [pipeline_ovis_image.py:182] ----my_debug--- [OvisImagePipeline] text_encoder device=cuda:0
+WARNING 05-21 01:25:48 [pipeline_ovis_image.py:188] ----my_debug--- [OvisImagePipeline] vae loaded, dtype=torch.bfloat16
+WARNING 05-21 01:25:50 [pipeline_ovis_image.py:195] ----my_debug--- [OvisImagePipeline] Creating OvisImageTransformer2DModel...
+WARNING 05-21 01:25:50 [ovis_image_transformer.py:385] ----my_debug--- [OvisImageTransformer2DModel.__init__] START
+WARNING 05-21 01:25:50 [ovis_image_transformer.py:386] ----my_debug--- [Transformer] od_config.dtype=torch.bfloat16
+WARNING 05-21 01:25:50 [ovis_image_transformer.py:387] ----my_debug--- [Transformer] od_config.quantization_config=None
+WARNING 05-21 01:25:50 [ovis_image_transformer.py:388] ----my_debug--- [Transformer] in_channels=64, out_channels=64, patch_size=1
+WARNING 05-21 01:25:50 [ovis_image_transformer.py:389] ----my_debug--- [Transformer] num_layers=6, num_single_layers=27
+WARNING 05-21 01:25:50 [ovis_image_transformer.py:390] ----my_debug--- [Transformer] num_attention_heads=24, attention_head_dim=128
+WARNING 05-21 01:25:50 [ovis_image_transformer.py:400] ----my_debug--- [Transformer] inner_dim=3072 (=24 * 128)
+WARNING 05-21 01:25:50 [ovis_image_transformer.py:401] ----my_debug--- [Transformer] num_layers from tf_model_config: 6
+WARNING 05-21 01:25:50 [ovis_image_transformer.py:412] ----my_debug--- [Transformer] Creating x_embedder: nn.Linear(in_channels=64, out_features=3072)
+WARNING 05-21 01:25:50 [ovis_image_transformer.py:414] ----my_debug--- [Transformer] x_embedder created, weight.dtype=torch.bfloat16
+WARNING 05-21 01:25:50 [ovis_image_transformer.py:415] ----my_debug--- [Transformer] x_embedder.weight.shape=torch.Size([3072, 64])
+INFO 05-21 01:25:50 [selector.py:87] Resolved diffusion attention backend 'SDPA' for role='self' via platform default
+WARNING 05-21 01:25:50 [pipeline_ovis_image.py:197] ----my_debug--- [OvisImagePipeline] transformer created, type=OvisImageTransformer2DModel
+WARNING 05-21 01:25:50 [pipeline_ovis_image.py:199] ----my_debug--- [OvisImagePipeline] transformer.x_embedder.weight dtype=torch.bfloat16, device=cuda:0
+WARNING 05-21 01:25:50 [pipeline_ovis_image.py:201] ----my_debug--- [OvisImagePipeline] transformer.in_channels=64, inner_dim=3072
+WARNING 05-21 01:25:50 [pipeline_ovis_image.py:202] ----my_debug--- [OvisImagePipeline.__init__] END
+WARNING 05-21 01:25:50 [diffusers_loader.py:335] ----my_debug--- [diffusers_loader] initialize_model returned, model type=OvisImagePipeline
+WARNING 05-21 01:25:50 [diffusers_loader.py:350] ----my_debug--- [diffusers_loader] model.transformer type=OvisImageTransformer2DModel
+WARNING 05-21 01:25:50 [diffusers_loader.py:352] ----my_debug--- [diffusers_loader] transformer.x_embedder type=Linear
+WARNING 05-21 01:25:50 [diffusers_loader.py:354] ----my_debug--- [diffusers_loader] transformer.x_embedder.weight dtype=torch.bfloat16, shape=torch.Size([3072, 64])
+WARNING 05-21 01:25:50 [diffusers_loader.py:356] ----my_debug--- [diffusers_loader] transformer.in_channels=64, inner_dim=3072
+WARNING 05-21 01:25:50 [diffusers_loader.py:368] ----my_debug--- [diffusers_loader] Calling load_weights(model)...
+INFO 05-21 01:25:52 [weight_utils.py:663] No transformer/diffusion_pytorch_model.safetensors.index.json found in remote.
+Multi-thread loading shards:   0% Completed | 0/2 [00:00<?, ?it/s]
+Multi-thread loading shards:  50% Completed | 1/2 [00:00<00:00,  1.22it/s]
+Multi-thread loading shards: 100% Completed | 2/2 [00:03<00:00,  1.67s/it]
+Multi-thread loading shards: 100% Completed | 2/2 [00:03<00:00,  1.54s/it]
+
+INFO 05-21 01:25:55 [diffusers_loader.py:414] Loading weights took 3.71 seconds
+WARNING 05-21 01:25:55 [diffusers_loader.py:373] ----my_debug--- [diffusers_loader] AFTER load_weights: transformer.x_embedder.weight dtype=torch.bfloat16, device=cuda:0
+WARNING 05-21 01:25:55 [diffusers_loader.py:381] ----my_debug--- [diffusers_loader] AFTER process_weights: transformer.x_embedder.weight dtype=torch.bfloat16, device=cuda:0
+WARNING 05-21 01:25:55 [diffusers_loader.py:383] ----my_debug--- ===== load_model END =====
+INFO 05-21 01:25:56 [diffusion_model_runner.py:144] Model loading took 20.3009 GiB and 15.271425 seconds
+INFO 05-21 01:25:56 [diffusion_model_runner.py:149] Model runner: Model loaded successfully.
+INFO 05-21 01:25:56 [diffusion_model_runner.py:88] Model runner: transformer compiled with torch.compile.
+INFO 05-21 01:25:56 [diffusion_model_runner.py:190] Model runner: Initialization complete.
+INFO 05-21 01:25:56 [diffusion_worker.py:305] Worker 0: Process-scoped GPU memory after model loading: 20.87 GiB.
+INFO 05-21 01:25:56 [manager.py:96] Initializing DiffusionLoRAManager: device=cuda:0, dtype=torch.bfloat16, max_cached_adapters=1, static_lora_path=None
+INFO 05-21 01:25:56 [diffusion_worker.py:206] Worker 0: Initialization complete.
+INFO 05-21 01:25:56 [diffusion_worker.py:851] Worker 0: Scheduler loop started.
+INFO 05-21 01:25:56 [diffusion_worker.py:753] Worker 0 ready to receive requests via shared memory
+INFO 05-21 01:25:56 [diffusion_engine.py:711] dummy run to warm up the model
+WARNING 05-21 01:25:56 [pipeline_ovis_image.py:253] ----my_debug--- [pipeline._get_ovis_prompt_embeds] START
+WARNING 05-21 01:25:56 [pipeline_ovis_image.py:254] ----my_debug--- [pipeline] text_encoder.dtype=torch.float32
+WARNING 05-21 01:25:56 [pipeline_ovis_image.py:255] ----my_debug--- [pipeline] text_encoder device=cuda:0
+WARNING 05-21 01:25:56 [pipeline_ovis_image.py:256] ----my_debug--- [pipeline] target dtype=torch.float32
+WARNING 05-21 01:25:56 [pipeline_ovis_image.py:257] ----my_debug--- [pipeline] transformer.x_embedder.weight dtype=torch.bfloat16
+WARNING 05-21 01:25:57 [pipeline_ovis_image.py:729] ----my_debug--- [pipeline] prepare_latents START
+WARNING 05-21 01:25:57 [pipeline_ovis_image.py:730] ----my_debug--- [pipeline] prompt_embeds.dtype=torch.float32, shape=torch.Size([1, 256, 2048]), device=cuda:0
+WARNING 05-21 01:25:57 [pipeline_ovis_image.py:731] ----my_debug--- [pipeline] transformer.x_embedder.weight dtype=torch.bfloat16, device=cuda:0
+WARNING 05-21 01:25:57 [pipeline_ovis_image.py:732] ----my_debug--- [pipeline] transformer.in_channels=64
+WARNING 05-21 01:25:57 [pipeline_ovis_image.py:733] ----my_debug--- [pipeline] num_channel_latents=16
+WARNING 05-21 01:25:57 [pipeline_ovis_image.py:734] ----my_debug--- [pipeline] latents dtype will be=torch.float32
+WARNING 05-21 01:25:57 [pipeline_ovis_image.py:748] ----my_debug--- [pipeline] latents prepared: dtype=torch.float32, shape=torch.Size([1, 1024, 64]), device=cuda:0
+WARNING 05-21 01:25:57 [ovis_image_transformer.py:475] ----my_debug--- ===== x_embedder forward START =====
+WARNING 05-21 01:25:57 [ovis_image_transformer.py:476] ----my_debug--- [INPUT hidden_states] shape=torch.Size([1, 1024, 64]), dtype=torch.float32, device=cuda:0
+WARNING 05-21 01:25:57 [ovis_image_transformer.py:477] ----my_debug--- [x_embedder.weight] shape=torch.Size([3072, 64]), dtype=torch.bfloat16, device=cuda:0
+WARNING 05-21 01:25:57 [ovis_image_transformer.py:479] ----my_debug--- [x_embedder.bias] shape=torch.Size([3072]), dtype=torch.bfloat16
+WARNING 05-21 01:25:57 [ovis_image_transformer.py:484] ----my_debug--- [DIMENSION CHECK] input_last_dim=64, weight_in_features=64, MATCH=True
+WARNING 05-21 01:25:57 [ovis_image_transformer.py:485] ----my_debug--- [DTYPE CHECK] input_dtype=torch.float32, weight_dtype=torch.bfloat16, MATCH=False
+WARNING 05-21 01:25:57 [ovis_image_transformer.py:486] ----my_debug--- [DEVICE CHECK] input_device=cuda:0, weight_device=cuda:0, MATCH=True
+WARNING 05-21 01:25:57 [ovis_image_transformer.py:487] ----my_debug--- ===== x_embedder forward END =====
+WARNING 05-21 01:25:57 [ovis_image_transformer.py:493] ----my_debug--- ===== ERROR in x_embedder =====
+WARNING 05-21 01:25:57 [ovis_image_transformer.py:494] ----my_debug--- Exception type: RuntimeError
+WARNING 05-21 01:25:57 [ovis_image_transformer.py:495] ----my_debug--- Exception message: mat1 and mat2 must have the same dtype, but got Float and BFloat16
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068] Error executing method 'execute_model'. This might cause issues in distributed execution.
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068] Traceback (most recent call last):
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]   File "/root/vo/vllm-omni/vllm_omni/diffusion/worker/diffusion_worker.py", line 1064, in execute_method
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]     return func(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]            ^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]   File "/root/vo/vllm-omni/vllm_omni/diffusion/worker/diffusion_worker.py", line 366, in execute_model
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]     output = self.model_runner.execute_model(req)
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]   File "/root/vo/vllm-omni/vllm_omni/diffusion/worker/diffusion_model_runner.py", line 297, in execute_model
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]     output = self.pipeline.forward(req)
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]   File "/root/vo/vllm-omni/vllm_omni/diffusion/models/ovis_image/pipeline_ovis_image.py", line 762, in forward
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]     latents = self.diffuse(
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]               ^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]   File "/root/vo/vllm-omni/vllm_omni/diffusion/models/ovis_image/pipeline_ovis_image.py", line 527, in diffuse
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]     noise_pred = self.predict_noise_maybe_with_cfg(
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]   File "/root/vo/vllm-omni/vllm_omni/diffusion/distributed/cfg_parallel.py", line 149, in predict_noise_maybe_with_cfg
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]     pred = self.predict_noise(**positive_kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]   File "/root/vo/vllm-omni/vllm_omni/diffusion/distributed/cfg_parallel.py", line 388, in predict_noise
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]     result = self.transformer(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]   File "/root/vo/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]     return self._call_impl(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]   File "/root/vo/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]     return forward_call(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]   File "/root/vo/vllm-omni/vllm_omni/diffusion/models/ovis_image/ovis_image_transformer.py", line 491, in forward
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]     hidden_states = self.x_embedder(hidden_states)
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]   File "/root/vo/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]     return self._call_impl(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]   File "/root/vo/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]     return forward_call(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]   File "/root/vo/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py", line 134, in forward
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]     return F.linear(input, self.weight, self.bias)
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:1068] RuntimeError: mat1 and mat2 must have the same dtype, but got Float and BFloat16
+ERROR 05-21 01:25:57 [diffusion_worker.py:748] Error executing RPC: mat1 and mat2 must have the same dtype, but got Float and BFloat16
+ERROR 05-21 01:25:57 [diffusion_worker.py:748] Traceback (most recent call last):
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]   File "/root/vo/vllm-omni/vllm_omni/diffusion/worker/diffusion_worker.py", line 745, in execute_rpc
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]     result = self.worker.execute_method(method, *args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]   File "/root/vo/vllm-omni/vllm_omni/diffusion/worker/diffusion_worker.py", line 1069, in execute_method
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]     raise e
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]   File "/root/vo/vllm-omni/vllm_omni/diffusion/worker/diffusion_worker.py", line 1064, in execute_method
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]     return func(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]            ^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]   File "/root/vo/vllm-omni/vllm_omni/diffusion/worker/diffusion_worker.py", line 366, in execute_model
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]     output = self.model_runner.execute_model(req)
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]   File "/root/vo/vllm-omni/vllm_omni/diffusion/worker/diffusion_model_runner.py", line 297, in execute_model
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]     output = self.pipeline.forward(req)
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]   File "/root/vo/vllm-omni/vllm_omni/diffusion/models/ovis_image/pipeline_ovis_image.py", line 762, in forward
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]     latents = self.diffuse(
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]               ^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]   File "/root/vo/vllm-omni/vllm_omni/diffusion/models/ovis_image/pipeline_ovis_image.py", line 527, in diffuse
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]     noise_pred = self.predict_noise_maybe_with_cfg(
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]   File "/root/vo/vllm-omni/vllm_omni/diffusion/distributed/cfg_parallel.py", line 149, in predict_noise_maybe_with_cfg
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]     pred = self.predict_noise(**positive_kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]   File "/root/vo/vllm-omni/vllm_omni/diffusion/distributed/cfg_parallel.py", line 388, in predict_noise
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]     result = self.transformer(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]   File "/root/vo/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]     return self._call_impl(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]   File "/root/vo/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]     return forward_call(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]   File "/root/vo/vllm-omni/vllm_omni/diffusion/models/ovis_image/ovis_image_transformer.py", line 491, in forward
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]     hidden_states = self.x_embedder(hidden_states)
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]   File "/root/vo/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]     return self._call_impl(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]   File "/root/vo/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]     return forward_call(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]   File "/root/vo/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py", line 134, in forward
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]     return F.linear(input, self.weight, self.bias)
+ERROR 05-21 01:25:57 [diffusion_worker.py:748]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:748] RuntimeError: mat1 and mat2 must have the same dtype, but got Float and BFloat16
+ERROR 05-21 01:25:57 [diffusion_worker.py:788] Error processing RPC: mat1 and mat2 must have the same dtype, but got Float and BFloat16
+ERROR 05-21 01:25:57 [diffusion_worker.py:788] Traceback (most recent call last):
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/vllm-omni/vllm_omni/diffusion/worker/diffusion_worker.py", line 784, in worker_busy_loop
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     result, should_reply = self.execute_rpc(msg)
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]                            ^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/vllm-omni/vllm_omni/diffusion/worker/diffusion_worker.py", line 749, in execute_rpc
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     raise e
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/vllm-omni/vllm_omni/diffusion/worker/diffusion_worker.py", line 745, in execute_rpc
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     result = self.worker.execute_method(method, *args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/vllm-omni/vllm_omni/diffusion/worker/diffusion_worker.py", line 1069, in execute_method
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     raise e
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/vllm-omni/vllm_omni/diffusion/worker/diffusion_worker.py", line 1064, in execute_method
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     return func(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]            ^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/vllm-omni/vllm_omni/diffusion/worker/diffusion_worker.py", line 366, in execute_model
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     output = self.model_runner.execute_model(req)
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/vllm-omni/vllm_omni/diffusion/worker/diffusion_model_runner.py", line 297, in execute_model
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     output = self.pipeline.forward(req)
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/vllm-omni/vllm_omni/diffusion/models/ovis_image/pipeline_ovis_image.py", line 762, in forward
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     latents = self.diffuse(
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]               ^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/vllm-omni/vllm_omni/diffusion/models/ovis_image/pipeline_ovis_image.py", line 527, in diffuse
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     noise_pred = self.predict_noise_maybe_with_cfg(
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/vllm-omni/vllm_omni/diffusion/distributed/cfg_parallel.py", line 149, in predict_noise_maybe_with_cfg
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     pred = self.predict_noise(**positive_kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/vllm-omni/vllm_omni/diffusion/distributed/cfg_parallel.py", line 388, in predict_noise
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     result = self.transformer(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     return self._call_impl(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     return forward_call(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/vllm-omni/vllm_omni/diffusion/models/ovis_image/ovis_image_transformer.py", line 491, in forward
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     hidden_states = self.x_embedder(hidden_states)
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     return self._call_impl(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     return forward_call(*args, **kwargs)
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]   File "/root/vo/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py", line 134, in forward
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]     return F.linear(input, self.weight, self.bias)
+ERROR 05-21 01:25:57 [diffusion_worker.py:788]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:57 [diffusion_worker.py:788] RuntimeError: mat1 and mat2 must have the same dtype, but got Float and BFloat16
+ERROR 05-21 01:25:57 [diffusion_engine.py:170] Dummy run failed: Dummy run failed: mat1 and mat2 must have the same dtype, but got Float and BFloat16
+INFO 05-21 01:25:57 [diffusion_worker.py:793] Worker 0: Received shutdown message
+INFO 05-21 01:25:57 [diffusion_worker.py:814] event loop terminated.
+INFO 05-21 01:25:57 [diffusion_worker.py:859] Worker 0: Shutdown complete.
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304] [AsyncOmniEngine] Stage initialization failed; shutting down 0 initialized client(s)
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304] Traceback (most recent call last):
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]   File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1288, in _initialize_stages
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]     initialized_clients_by_stage = self._initialize_stage_replicas(stage_plans, stage_init_timeout)
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]   File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1196, in _initialize_stage_replicas
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]     raise primary_exc
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]   File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1155, in _initialize_stage_replicas
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]     initialized_clients_by_stage[stage_idx][replica.replica_id] = self._initialize_replica(
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]                                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]   File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1113, in _initialize_replica
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]     return self._initialize_diffusion_replica(plan, stage_init_timeout, stage_launch_lock)
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]   File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1073, in _initialize_diffusion_replica
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]     client = initialize_diffusion_stage(
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]   File "/root/vo/vllm-omni/vllm_omni/engine/stage_init_utils.py", line 1040, in initialize_diffusion_stage
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]     return create_diffusion_client(model, od_config, metadata, stage_init_timeout, batch_size, use_inline)
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]   File "/root/vo/vllm-omni/vllm_omni/diffusion/stage_diffusion_client.py", line 56, in create_diffusion_client
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]     return InlineStageDiffusionClient(model, od_config, metadata, batch_size=batch_size)
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]   File "/root/vo/vllm-omni/vllm_omni/diffusion/inline_stage_diffusion_client.py", line 62, in __init__
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]     self._engine = DiffusionEngine.make_engine(self.od_config)
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]   File "/root/vo/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 575, in make_engine
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]     return DiffusionEngine(config, scheduler=scheduler)
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]   File "/root/vo/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 172, in __init__
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]     raise e
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]   File "/root/vo/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 168, in __init__
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]     self._dummy_run()
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]   File "/root/vo/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 715, in _dummy_run
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304]     raise RuntimeError(f"Dummy run failed: {output.error}")
+ERROR 05-21 01:25:58 [async_omni_engine.py:1304] RuntimeError: Dummy run failed: mat1 and mat2 must have the same dtype, but got Float and BFloat16
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383] [AsyncOmniEngine] Orchestrator thread crashed
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383] Traceback (most recent call last):
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]   File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1377, in _bootstrap_orchestrator
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]     loop.run_until_complete(_run_orchestrator())
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]   File "/root/miniconda3/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]     return future.result()
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]            ^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]   File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1352, in _run_orchestrator
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]     self._initialize_stages(stage_init_timeout)
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]   File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1288, in _initialize_stages
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]     initialized_clients_by_stage = self._initialize_stage_replicas(stage_plans, stage_init_timeout)
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]   File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1196, in _initialize_stage_replicas
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]     raise primary_exc
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]   File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1155, in _initialize_stage_replicas
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]     initialized_clients_by_stage[stage_idx][replica.replica_id] = self._initialize_replica(
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]                                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]   File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1113, in _initialize_replica
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]     return self._initialize_diffusion_replica(plan, stage_init_timeout, stage_launch_lock)
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]   File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1073, in _initialize_diffusion_replica
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]     client = initialize_diffusion_stage(
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]   File "/root/vo/vllm-omni/vllm_omni/engine/stage_init_utils.py", line 1040, in initialize_diffusion_stage
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]     return create_diffusion_client(model, od_config, metadata, stage_init_timeout, batch_size, use_inline)
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]   File "/root/vo/vllm-omni/vllm_omni/diffusion/stage_diffusion_client.py", line 56, in create_diffusion_client
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]     return InlineStageDiffusionClient(model, od_config, metadata, batch_size=batch_size)
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]   File "/root/vo/vllm-omni/vllm_omni/diffusion/inline_stage_diffusion_client.py", line 62, in __init__
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]     self._engine = DiffusionEngine.make_engine(self.od_config)
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]   File "/root/vo/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 575, in make_engine
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]     return DiffusionEngine(config, scheduler=scheduler)
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]   File "/root/vo/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 172, in __init__
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]     raise e
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]   File "/root/vo/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 168, in __init__
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]     self._dummy_run()
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]   File "/root/vo/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 715, in _dummy_run
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383]     raise RuntimeError(f"Dummy run failed: {output.error}")
+ERROR 05-21 01:25:58 [async_omni_engine.py:1383] RuntimeError: Dummy run failed: mat1 and mat2 must have the same dtype, but got Float and BFloat16
+INFO 05-21 01:25:58 [async_omni_engine.py:2406] [AsyncOmniEngine] Shutting down Orchestrator
+Exception in thread orchestrator:
+Traceback (most recent call last):
+  File "/root/miniconda3/lib/python3.12/threading.py", line 1073, in _bootstrap_inner
+    self.run()
+  File "/root/miniconda3/lib/python3.12/threading.py", line 1010, in run
+    self._target(*self._args, **self._kwargs)
+  File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1377, in _bootstrap_orchestrator
+    loop.run_until_complete(_run_orchestrator())
+  File "/root/miniconda3/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1352, in _run_orchestrator
+    self._initialize_stages(stage_init_timeout)
+  File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1288, in _initialize_stages
+    initialized_clients_by_stage = self._initialize_stage_replicas(stage_plans, stage_init_timeout)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1196, in _initialize_stage_replicas
+    raise primary_exc
+  File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1155, in _initialize_stage_replicas
+    initialized_clients_by_stage[stage_idx][replica.replica_id] = self._initialize_replica(
+                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1113, in _initialize_replica
+    return self._initialize_diffusion_replica(plan, stage_init_timeout, stage_launch_lock)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1073, in _initialize_diffusion_replica
+    client = initialize_diffusion_stage(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/engine/stage_init_utils.py", line 1040, in initialize_diffusion_stage
+    return create_diffusion_client(model, od_config, metadata, stage_init_timeout, batch_size, use_inline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/diffusion/stage_diffusion_client.py", line 56, in create_diffusion_client
+    return InlineStageDiffusionClient(model, od_config, metadata, batch_size=batch_size)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/diffusion/inline_stage_diffusion_client.py", line 62, in __init__
+    self._engine = DiffusionEngine.make_engine(self.od_config)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 575, in make_engine
+    return DiffusionEngine(config, scheduler=scheduler)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 172, in __init__
+    raise e
+  File "/root/vo/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 168, in __init__
+    self._dummy_run()
+  File "/root/vo/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 715, in _dummy_run
+    raise RuntimeError(f"Dummy run failed: {output.error}")
+RuntimeError: Dummy run failed: mat1 and mat2 must have the same dtype, but got Float and BFloat16
+Traceback (most recent call last):
+  File "/root/miniconda3/lib/python3.12/threading.py", line 1073, in _bootstrap_inner
+    self.run()
+  File "/root/miniconda3/lib/python3.12/threading.py", line 1010, in run
+    self._target(*self._args, **self._kwargs)
+  File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1377, in _bootstrap_orchestrator
+    loop.run_until_complete(_run_orchestrator())
+  File "/root/miniconda3/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1352, in _run_orchestrator
+    self._initialize_stages(stage_init_timeout)
+  File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1288, in _initialize_stages
+    initialized_clients_by_stage = self._initialize_stage_replicas(stage_plans, stage_init_timeout)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1196, in _initialize_stage_replicas
+    raise primary_exc
+  File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1155, in _initialize_stage_replicas
+    initialized_clients_by_stage[stage_idx][replica.replica_id] = self._initialize_replica(
+                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1113, in _initialize_replica
+    return self._initialize_diffusion_replica(plan, stage_init_timeout, stage_launch_lock)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1073, in _initialize_diffusion_replica
+    client = initialize_diffusion_stage(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/engine/stage_init_utils.py", line 1040, in initialize_diffusion_stage
+    return create_diffusion_client(model, od_config, metadata, stage_init_timeout, batch_size, use_inline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/diffusion/stage_diffusion_client.py", line 56, in create_diffusion_client
+    return InlineStageDiffusionClient(model, od_config, metadata, batch_size=batch_size)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/diffusion/inline_stage_diffusion_client.py", line 62, in __init__
+    self._engine = DiffusionEngine.make_engine(self.od_config)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 575, in make_engine
+    return DiffusionEngine(config, scheduler=scheduler)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 172, in __init__
+    raise e
+  File "/root/vo/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 168, in __init__
+    self._dummy_run()
+  File "/root/vo/vllm-omni/vllm_omni/diffusion/diffusion_engine.py", line 715, in _dummy_run
+    raise RuntimeError(f"Dummy run failed: {output.error}")
+RuntimeError: Dummy run failed: mat1 and mat2 must have the same dtype, but got Float and BFloat16
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/root/vo/vllm-omni/examples/offline_inference/text_to_image/text_to_image.py", line 528, in <module>
+    main()
+  File "/root/vo/vllm-omni/examples/offline_inference/text_to_image/text_to_image.py", line 403, in main
+    omni = Omni(**omni_kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/entrypoints/omni_base.py", line 174, in __init__
+    self.engine = AsyncOmniEngine(
+                  ^^^^^^^^^^^^^^^^
+  File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 375, in __init__
+    self._wait_for_orchestrator_init(startup_future, startup_timeout)
+  File "/root/vo/vllm-omni/vllm_omni/engine/async_omni_engine.py", line 1421, in _wait_for_orchestrator_init
+    startup_future.result(
+  File "/root/miniconda3/lib/python3.12/concurrent/futures/_base.py", line 456, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/root/miniconda3/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception

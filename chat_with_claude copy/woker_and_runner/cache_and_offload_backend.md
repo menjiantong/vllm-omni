@@ -111,19 +111,19 @@ vllm_omni/diffusion/cache/
 
 Step t:
   输入: hidden_states_t, timestep_t
-
+  
   提取 modulated_input = first_block(hidden_states_t, timestep_t)
-
+  
   计算 L1 距离:
-    rel_l1 = |modulated_input_t - modulated_input_{t-1}|
+    rel_l1 = |modulated_input_t - modulated_input_{t-1}| 
              / |modulated_input_{t-1}|
-
+  
   多项式缩放 (模型特定系数):
     rescaled = poly(rel_l1)
-
+  
   累积距离:
     accumulated += rescaled
-
+  
   决策:
     if accumulated < threshold:
         使用缓存: hidden_states = hidden_states + previous_residual
@@ -186,16 +186,16 @@ class TeaCacheHook(ModelHook):
     def new_forward(self, module, *args, **kwargs):
         # 1. 获取模型特定的提取器
         ctx = self.extractor_fn(module, *args, **kwargs)
-
+        
         # 2. 设置 CFG 分支上下文
         context_name = f"teacache_{cache_branch}"
         state = self.state_manager.get_state()
-
+        
         # 3. 决策是否使用缓存
         should_compute = self._should_compute_full_transformer(
             state, ctx.modulated_input
         )
-
+        
         if not should_compute and state.previous_residual is not None:
             # 快速路径: 复用缓存
             ctx.hidden_states = ctx.hidden_states + state.previous_residual
@@ -203,24 +203,24 @@ class TeaCacheHook(ModelHook):
             # 慢速路径: 完整计算
             outputs = ctx.run_transformer_blocks()
             state.previous_residual = ctx.hidden_states - ori_hidden_states
-
+        
         return ctx.postprocess(output)
-
+    
     def _should_compute_full_transformer(self, state, modulated_inp):
         # TeaCache 核心算法
         if state.cnt == 0:
             return True  # 第一步必须计算
-
+        
         # 计算 L1 距离
         rel_distance = (
             (modulated_inp - state.previous_modulated_input).abs().mean()
             / state.previous_modulated_input.abs().mean()
         ).cpu().item()
-
+        
         # 多项式缩放
         rescaled_distance = self.rescale_func(rel_distance)
         state.accumulated_rel_l1_distance += abs(rescaled_distance)
-
+        
         # 与阈值比较
         return state.accumulated_rel_l1_distance >= self.config.rel_l1_thresh
 ```
@@ -344,15 +344,15 @@ _MODEL_COEFFICIENTS = {
 class CacheDiTBackend(CacheBackend):
     def enable(self, pipeline):
         pipeline_name = pipeline.__class__.__name__
-
+        
         # 检查是否有自定义 enabler
         if pipeline_name in CUSTOM_DIT_ENABLERS:
             self._refresh_func = CUSTOM_DIT_ENABLERS[pipeline_name](pipeline, self.config)
         else:
             self._refresh_func = enable_cache_for_dit(pipeline, self.config)
-
+        
         self.enabled = True
-
+    
     def refresh(self, pipeline, num_inference_steps, verbose=True):
         if num_inference_steps != self._last_num_inference_steps:
             self._refresh_func(pipeline, num_inference_steps, verbose)
@@ -429,7 +429,7 @@ class DiffusionCacheConfig:
     # TeaCache 参数
     rel_l1_thresh: float = 0.2           # L1 距离阈值
     coefficients: list[float] | None = None  # 多项式系数
-
+    
     # Cache-DiT 参数
     Fn_compute_blocks: int = 1           # 前向计算块数
     Bn_compute_blocks: int = 0           # 后向计算块数
@@ -437,11 +437,11 @@ class DiffusionCacheConfig:
     max_cached_steps: int = -1           # 最大缓存步数 (-1 = 无限)
     residual_diff_threshold: float = 0.24  # 残差阈值
     max_continuous_cached_steps: int = 3   # 最大连续缓存步数
-
+    
     # TaylorSeer 配置
     enable_taylorseer: bool = False
     taylorseer_order: int = 1
-
+    
     # SCM (Step Computation Masking)
     scm_steps_mask_policy: str | None = None
     scm_steps_policy: str = "dynamic"
@@ -575,30 +575,30 @@ Step 51: 图像解码
 
 class SequentialOffloadHook(ModelHook):
     """互斥卸载 Hook"""
-
+    
     def __init__(self, offload_targets, device, pin_memory=True, use_hsdp=False):
         self.offload_targets = offload_targets  # 需要卸载的目标模块
         self.device = device
         self.pin_memory = pin_memory
-
+    
     def pre_forward(self, module, *args, **kwargs):
         # 1. 卸载目标模块到 CPU
         for target in self.offload_targets:
             self._to_cpu(target)
-
+        
         # 2. 加载当前模块到 GPU
         self._to_gpu(module)
-
+        
         # 3. 同步 GPU
         current_omni_platform.synchronize()
-
+        
         return args, kwargs
-
+    
     def _to_cpu(self, module):
         # 移动参数和缓冲区到 CPU
         self._move_params(module, torch.device("cpu"), pin_memory=self.pin_memory)
         current_omni_platform.empty_cache()
-
+    
     def _to_gpu(self, module):
         # 移动参数和缓冲区到 GPU
         self._move_params(module, self.device, non_blocking=False)
@@ -606,7 +606,7 @@ class SequentialOffloadHook(ModelHook):
 
 def apply_sequential_offload(dit_modules, encoder_modules, device, ...):
     """应用互斥卸载 Hook"""
-
+    
     # DiT 模块运行时卸载 Encoder
     for dit_mod in dit_modules:
         registry = HookRegistry.get_or_create(dit_mod)
@@ -615,7 +615,7 @@ def apply_sequential_offload(dit_modules, encoder_modules, device, ...):
             device=device,
         )
         registry.register_hook(SequentialOffloadHook._HOOK_NAME, hook)
-
+    
     # Encoder 运行时卸载 DiT
     for enc in encoder_modules:
         registry = HookRegistry.get_or_create(enc)
@@ -723,37 +723,37 @@ Layer-Wise Offloading:
 
 class LayerwiseOffloadHook(ModelHook):
     """层级卸载 Hook"""
-
+    
     def __init__(self, next_block, device, stream, pin_memory=True):
         self.next_block = next_block      # 下一个要预取的 block
         self.device = device
         self.copy_stream = stream         # 异步拷贝流
-
+        
         # 预分配 CPU 扁平化权重存储
         self.dtype_cpu_flattened_weights = {}
         self.dtype_metadata = {}
-
+    
     def initialize_hook(self, module):
         # 初始化: 将 next_block 的权重扁平化存储到 CPU
         self.dtype_cpu_flattened_weights, self.dtype_metadata = \
             self._to_cpu(self.next_block_parameters, self.next_block_buffers, ...)
         return module
-
+    
     def pre_forward(self, module, *args, **kwargs):
         # 预取下一层权重 (异步)
         self.prefetch_layer(non_blocking=True)
         return args, kwargs
-
+    
     def post_forward(self, module, output):
         # 释放当前层 GPU 显存
         self.offload_layer()
         return output
-
+    
     @torch.compiler.disable
     def prefetch_layer(self, non_blocking=True):
         """异步预取下一层权重: CPU → GPU"""
         self.copy_stream.wait_stream(current_omni_platform.current_stream())
-
+        
         gpu_weights = {}
         with current_omni_platform.stream(self.copy_stream):
             # 在拷贝流上异步传输
@@ -761,18 +761,18 @@ class LayerwiseOffloadHook(ModelHook):
                 gpu_weight = torch.empty(cpu_weight.shape, dtype=dtype, device=self.device)
                 gpu_weight.copy_(cpu_weight, non_blocking=non_blocking)
                 gpu_weights[dtype] = gpu_weight
-
+        
         # 将 GPU 权重视图绑定到参数
         for metadata in self.dtype_metadata[dtype]:
             target_param = self.next_block_parameters[metadata["name"]]
             target_param.data = gpu_weight[metadata["offset"]:offset+metadata["numel"]].view(metadata["shape"])
-
+    
     def offload_layer(self):
         """释放当前层 GPU 显存"""
         # 等待预取完成
         if self._prefetch_done is not None:
             current_omni_platform.current_stream().wait_event(self._prefetch_done)
-
+        
         # 替换为空占位符 (释放显存)
         for param in self.block_parameters.values():
             param.data = torch.empty((0,), device=self.device, dtype=param.dtype)
@@ -781,17 +781,17 @@ class LayerwiseOffloadHook(ModelHook):
 class LayerWiseOffloadBackend(OffloadBackend):
     def enable(self, pipeline):
         modules = ModuleDiscovery.discover(pipeline)
-
+        
         for dit_module in modules.dits:
             blocks = self.get_blocks_from_dit(dit_module)
-
+            
             # 为每个 block 注册 hook
             last_block, first_block = blocks[-1], blocks[0]
-
+            
             # 最后一个 block 预取第一个 block (循环)
             last_hook = apply_block_hook(last_block, first_block, ...)
             last_hook.prefetch_layer(non_blocking=False)  # 初始预取
-
+            
             # 其他 block 预取下一个 block
             for i, block in enumerate(blocks[:-1]):
                 next_block = blocks[i + 1]
@@ -897,16 +897,16 @@ def execute_model(self, req: OmniDiffusionRequest) -> DiffusionOutput:
         # 1. 刷新缓存上下文 (每次生成开始时)
         if self.cache_backend is not None and self.cache_backend.is_enabled():
             self.cache_backend.refresh(
-                self.pipeline,
+                self.pipeline, 
                 req.sampling_params.num_inference_steps
             )
-
+        
         # 2. 执行前向传播
         #    - Offloading 通过 Hook 自动处理
         #    - Cache 通过 Hook 或 BlockAdapter 自动处理
         with set_forward_context(...):
             output = self.pipeline.forward(req)
-
+        
         return output
 ```
 
