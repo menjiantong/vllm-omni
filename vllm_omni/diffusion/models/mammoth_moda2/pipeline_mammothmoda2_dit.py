@@ -9,6 +9,7 @@ from diffusers.utils.torch_utils import randn_tensor
 from torch import nn
 from transformers.models.qwen2.modeling_qwen2 import Qwen2RMSNorm
 from vllm.config import VllmConfig
+from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.model_executor.models.utils import AutoWeightsLoader, WeightsMapper
 
 from vllm_omni.model_executor.models.output_templates import OmniOutput
@@ -294,5 +295,41 @@ class MammothModa2DiTPipeline(nn.Module):
         return None
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        loader = AutoWeightsLoader(self)
-        return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
+        """Load weights with TP-aware mapping.
+
+        Uses Transformer2DModel.load_weights for the gen_transformer
+        which handles TP weight mapping automatically.
+        """
+        tp_size = get_tensor_model_parallel_world_size()
+
+        # Collect weights by prefix
+        gen_transformer_weights = []
+        other_weights = []
+
+        for name, tensor in weights:
+            # Skip LLM weights
+            if name.startswith("llm_model."):
+                continue
+
+            if name.startswith("gen_transformer."):
+                # Remove prefix for Transformer2DModel
+                stripped_name = name[len("gen_transformer."):]
+                gen_transformer_weights.append((stripped_name, tensor))
+            else:
+                other_weights.append((name, tensor))
+
+        loaded = set()
+
+        # Load gen_transformer weights using its own load_weights method
+        # This handles TP weight mapping automatically
+        if gen_transformer_weights:
+            gen_loaded = self.gen_transformer.load_weights(gen_transformer_weights)
+            loaded.update(f"gen_transformer.{name}" for name in gen_loaded)
+
+        # Load other weights (VAE, etc.) using AutoWeightsLoader
+        if other_weights:
+            loader = AutoWeightsLoader(self)
+            other_loaded = loader.load_weights(other_weights, mapper=self.hf_to_vllm_mapper)
+            loaded.update(other_loaded)
+
+        return loaded
