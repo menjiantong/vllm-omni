@@ -260,7 +260,32 @@ class Lumina2CombinedTimestepCaptionEmbedding(nn.Module):
         return time_embed, caption_embed
 
 
+class SimpleFeedForward(nn.Module):
+    """Simple SwiGLU FFN without TP support.
+
+    Used by lightweight modules like SimpleQFormerImageRefiner that don't need TP.
+    Parameter names match the checkpoint format (linear_1/2/3), so no weight mapping required.
+    """
+
+    def __init__(self, dim: int, inner_dim: int):
+        super().__init__()
+        self.linear_1 = nn.Linear(dim, inner_dim, bias=False)  # gate
+        self.linear_2 = nn.Linear(inner_dim, dim, bias=False)  # down
+        self.linear_3 = nn.Linear(dim, inner_dim, bias=False)  # up
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.linear_2(F.silu(self.linear_1(x)) * self.linear_3(x))
+
+
 class SimpleQFormerImageRefiner(nn.Module):
+    """Lightweight Q-Former for image condition refinement.
+
+    Not TP-enabled because:
+    - Small parameter count (~0.5B for typical config)
+    - Only 2 layers, not a performance bottleneck
+    - Similar modules in other models (e.g., HunyuanVideo TokenRefiner) also skip TP
+    """
+
     def __init__(
         self,
         hidden_size: int,
@@ -301,7 +326,7 @@ class SimpleQFormerImageRefiner(nn.Module):
                             embed_dim=hidden_size, num_heads=self.num_heads, dropout=dropout, batch_first=True
                         ),
                         ln_ffn=Qwen2RMSNorm(hidden_size, eps=norm_eps),
-                        ffn=LuminaFeedForward(dim=hidden_size, inner_dim=4 * hidden_size),
+                        ffn=SimpleFeedForward(dim=hidden_size, inner_dim=4 * hidden_size),
                     )
                 )
             )
