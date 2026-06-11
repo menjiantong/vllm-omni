@@ -4,10 +4,9 @@ from collections.abc import Iterable
 import torch
 import torch.nn.functional as F
 from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.models.attention_processor import Attention
 from diffusers.models.embeddings import TimestepEmbedding, Timesteps
 from diffusers.models.modeling_utils import ModelMixin
-from einops import rearrange, repeat
+from einops import rearrange
 from torch import nn
 from transformers.models.qwen2.modeling_qwen2 import Qwen2RMSNorm
 from vllm.distributed import get_tensor_model_parallel_world_size
@@ -16,27 +15,10 @@ from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.linear import (
     MergedColumnParallelLinear,
     QKVParallelLinear,
-    ReplicatedLinear,
     RowParallelLinear,
 )
 
-from .rope_real import RotaryPosEmbedReal
-
-try:
-    from transformers.modeling_flash_attention_utils import (  # type: ignore
-        flash_attn_varlen_func,  # pyright: ignore[reportAttributeAccessIssue]
-        is_flash_attn_available,
-    )
-except Exception:  # pragma: no cover - best-effort compatibility
-    flash_attn_varlen_func = None  # type: ignore[assignment]
-
-    def is_flash_attn_available() -> bool:  # type: ignore[override]
-        return False
-
-
-from .rope_real import apply_real_rotary_emb
-
-_HAS_FLASH_ATTN_VARLEN = bool(is_flash_attn_available()) and flash_attn_varlen_func is not None
+from .rope_real import RotaryPosEmbedReal, apply_real_rotary_emb
 
 logger = init_logger(__name__)
 
@@ -156,14 +138,10 @@ class LuminaFeedForward(nn.Module):
     """
     SwiGLU FeedForward with Tensor Parallel support.
 
-    Original structure:
-        linear_1: gate projection (dim -> inner_dim)
-        linear_3: up projection (dim -> inner_dim)
-        linear_2: down projection (inner_dim -> dim)
-
-    TP structure (when tp_size > 1):
-        w13: MergedColumnParallelLinear combining gate + up
-        w2: RowParallelLinear for down (with all-reduce)
+    Weight mapping (for loading from diffusers checkpoints):
+        linear_1: gate projection -> w13 shard 0
+        linear_3: up projection -> w13 shard 1
+        linear_2: down projection -> w2
     """
 
     def __init__(
@@ -182,45 +160,27 @@ class LuminaFeedForward(nn.Module):
         if multiple_of is not None:
             inner_dim = multiple_of * ((inner_dim + multiple_of - 1) // multiple_of)
 
-        tp_size = _get_tp_size()
-
-        if tp_size > 1:
-            # TP mode: use parallel layers
-            self.w13 = MergedColumnParallelLinear(
-                dim,
-                [inner_dim, inner_dim],  # [gate_dim, up_dim]
-                bias=False,
-                return_bias=False,
-            )
-            self.act = SiluAndMul()
-            self.w2 = RowParallelLinear(
-                inner_dim,
-                dim,
-                bias=False,
-                input_is_parallel=True,
-                return_bias=False,
-            )
-            self._is_tp = True
-        else:
-            # Non-TP mode: use standard layers
-            self.linear_1 = nn.Linear(dim, inner_dim, bias=False)  # gate
-            self.linear_2 = nn.Linear(inner_dim, dim, bias=False)  # down
-            self.linear_3 = nn.Linear(dim, inner_dim, bias=False)  # up
-            self._is_tp = False
-
-    def swiglu(self, x, y):
-        return F.silu(x.float(), inplace=False).to(x.dtype) * y
+        # Use MergedColumnParallelLinear for gate + up projections
+        # Works for both tp_size=1 and tp_size>1
+        self.w13 = MergedColumnParallelLinear(
+            dim,
+            [inner_dim, inner_dim],  # [gate_dim, up_dim]
+            bias=False,
+            return_bias=False,
+        )
+        self.act = SiluAndMul()
+        self.w2 = RowParallelLinear(
+            inner_dim,
+            dim,
+            bias=False,
+            input_is_parallel=True,
+            return_bias=False,
+        )
 
     def forward(self, x):
-        if self._is_tp:
-            # TP path
-            x = self.w13(x)
-            x = self.act(x)
-            return self.w2(x)
-        else:
-            # Non-TP path
-            h1, h2 = self.linear_1(x), self.linear_3(x)
-            return self.linear_2(self.swiglu(h1, h2))
+        x = self.w13(x)
+        x = self.act(x)
+        return self.w2(x)
 
 
 class LuminaLayerNormContinuous(nn.Module):
@@ -389,136 +349,6 @@ class SimpleQFormerImageRefiner(nn.Module):
         return q
 
 
-class AttnProcessor:
-    def __init__(self) -> None:
-        if not hasattr(F, "scaled_dot_product_attention"):
-            raise ImportError("AttnProcessor requires PyTorch 2.0+ (F.scaled_dot_product_attention).")
-
-    def __call__(
-        self,
-        attn: Attention,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
-        attention_mask: torch.Tensor | None = None,
-        image_rotary_emb: torch.Tensor | None = None,
-        base_sequence_length: int | None = None,
-    ) -> torch.Tensor:
-        batch_size, sequence_length, _ = hidden_states.shape
-
-        # Get Query-Key-Value Pair
-        query = attn.to_q(hidden_states)
-        key = attn.to_k(encoder_hidden_states)
-        value = attn.to_v(encoder_hidden_states)
-
-        query_dim = query.shape[-1]
-        inner_dim = key.shape[-1]
-        head_dim = query_dim // attn.heads
-        dtype = query.dtype
-
-        # Get key-value heads
-        kv_heads = inner_dim // head_dim
-
-        # Reshape tensors for attention computation
-        query = query.view(batch_size, -1, attn.heads, head_dim)
-        key = key.view(batch_size, -1, kv_heads, head_dim)
-        value = value.view(batch_size, -1, kv_heads, head_dim)
-
-        # Apply Query-Key normalization
-        if attn.norm_q is not None:
-            query = attn.norm_q(query)
-        if attn.norm_k is not None:
-            key = attn.norm_k(key)
-
-        # Apply Rotary Position Embeddings
-        if image_rotary_emb is not None:
-            query = apply_real_rotary_emb(query, image_rotary_emb[0], image_rotary_emb[1])
-            key = apply_real_rotary_emb(key, image_rotary_emb[0], image_rotary_emb[1])
-
-        query, key = query.to(dtype), key.to(dtype)
-
-        # Calculate attention scale
-        if base_sequence_length is not None:
-            softmax_scale = math.sqrt(math.log(sequence_length, base_sequence_length)) * attn.scale
-        else:
-            softmax_scale = attn.scale
-
-        if _HAS_FLASH_ATTN_VARLEN and attention_mask is not None and hidden_states.is_cuda:
-            # Flash-Attn varlen expects packed tokens + cu_seqlens. Here we only need
-            # the self-attention case (q/k/v share the same padding mask).
-            attention_mask = attention_mask.to(torch.bool)
-            seqlens = attention_mask.sum(dim=-1, dtype=torch.int32)
-            indices = torch.nonzero(attention_mask.flatten(), as_tuple=False).flatten()
-            max_seqlen = int(seqlens.max().item())
-            cu_seqlens = F.pad(torch.cumsum(seqlens, dim=0, dtype=torch.int32), (1, 0))
-
-            query_states = query.reshape(batch_size * sequence_length, attn.heads, head_dim)[indices]
-            key_states = key.reshape(batch_size * sequence_length, kv_heads, head_dim)[indices]
-            value_states = value.reshape(batch_size * sequence_length, kv_heads, head_dim)[indices]
-
-            if kv_heads < attn.heads:
-                key_states = repeat(key_states, "l h c -> l (h k) c", k=attn.heads // kv_heads)
-                value_states = repeat(value_states, "l h c -> l (h k) c", k=attn.heads // kv_heads)
-
-            attn_output_unpad = flash_attn_varlen_func(
-                query_states,
-                key_states,
-                value_states,
-                cu_seqlens_q=cu_seqlens,
-                cu_seqlens_k=cu_seqlens,
-                max_seqlen_q=max_seqlen,
-                max_seqlen_k=max_seqlen,
-                dropout_p=0.0,
-                causal=False,
-                softmax_scale=softmax_scale,
-            )
-
-            out = torch.zeros(
-                (batch_size * sequence_length, attn.heads, head_dim),
-                device=attn_output_unpad.device,
-                dtype=attn_output_unpad.dtype,
-            )
-            out[indices] = attn_output_unpad
-            hidden_states = out.view(batch_size, sequence_length, attn.heads, head_dim).flatten(-2)
-            hidden_states = hidden_states.type_as(query)
-        else:
-            # PyTorch SDPA path.
-            attn_mask = None
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(torch.bool)
-                attn_mask = attention_mask.view(batch_size, 1, 1, -1)
-
-            query = query.transpose(1, 2)  # [B, H, S, D]
-            key = key.transpose(1, 2)  # [B, H_kv, S, D]
-            value = value.transpose(1, 2)
-
-            if kv_heads < attn.heads:
-                key = key.repeat_interleave(attn.heads // kv_heads, dim=1)
-                value = value.repeat_interleave(attn.heads // kv_heads, dim=1)
-
-            hidden_states = F.scaled_dot_product_attention(
-                query,
-                key,
-                value,
-                attn_mask=attn_mask,
-                dropout_p=0.0,
-                is_causal=False,
-                scale=softmax_scale,
-            )
-
-            if attention_mask is not None:
-                # Keep padding tokens consistent with the flash-varlen path (zero output).
-                hidden_states = hidden_states * attention_mask[:, None, :, None]
-
-            hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
-            hidden_states = hidden_states.type_as(query)
-
-        # Apply output projection
-        hidden_states = attn.to_out[0](hidden_states)
-        hidden_states = attn.to_out[1](hidden_states)
-
-        return hidden_states
-
-
 class TPAttention(nn.Module):
     """
     Tensor Parallel Attention for MammothModa2.
@@ -639,45 +469,21 @@ class TransformerBlock(nn.Module):
         modulation: bool = True,
     ) -> None:
         """Initialize the transformer block."""
-        logger.info("--my--debug-- TransformerBlock.__init__ called with: dim=%s, num_attention_heads=%s, num_kv_heads=%s, modulation=%s",
-                    dim, num_attention_heads, num_kv_heads, modulation)
         super().__init__()
         self.head_dim = dim // num_attention_heads
         self.modulation = modulation
         self.num_attention_heads = num_attention_heads
         self.num_kv_heads = num_kv_heads
 
-        tp_size = _get_tp_size()
+        # Use TPAttention for both tp_size=1 and tp_size>1
+        self.attn = TPAttention(
+            dim=dim,
+            num_heads=num_attention_heads,
+            num_kv_heads=num_kv_heads,
+            eps=1e-5,
+        )
 
-        if tp_size > 1:
-            # TP mode: use parallel attention
-            self.attn = TPAttention(
-                dim=dim,
-                num_heads=num_attention_heads,
-                num_kv_heads=num_kv_heads,
-                eps=1e-5,
-            )
-            self._is_tp_attn = True
-        else:
-            # Non-TP mode: use diffusers Attention
-            processor = AttnProcessor()
-            self.attn = Attention(
-                query_dim=dim,
-                cross_attention_dim=None,
-                dim_head=dim // num_attention_heads,
-                qk_norm=None,
-                heads=num_attention_heads,
-                kv_heads=num_kv_heads,
-                eps=1e-5,
-                bias=False,
-                out_bias=False,
-                processor=processor,
-            )
-            self.attn.norm_q = Qwen2RMSNorm(self.head_dim, eps=1e-5)
-            self.attn.norm_k = Qwen2RMSNorm(self.head_dim, eps=1e-5)
-            self._is_tp_attn = False
-
-        # Initialize feed-forward network (TP-enabled in LuminaFeedForward)
+        # Initialize feed-forward network
         self.feed_forward = LuminaFeedForward(
             dim=dim, inner_dim=4 * dim, multiple_of=multiple_of, ffn_dim_multiplier=ffn_dim_multiplier
         )
@@ -699,29 +505,17 @@ class TransformerBlock(nn.Module):
         image_rotary_emb: torch.Tensor,
         temb: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        logger.info("--my--debug-- TransformerBlock.forward: hidden_states.shape=%s, attention_mask.shape=%s, temb=%s",
-                    tuple(hidden_states.shape),
-                    tuple(attention_mask.shape) if attention_mask is not None else None,
-                    tuple(temb.shape) if temb is not None else None)
         if self.modulation:
             if temb is None:
                 raise ValueError("temb must be provided when modulation is enabled")
 
             norm_hidden_states, gate_msa, scale_mlp, gate_mlp = self.norm1(hidden_states, temb)
 
-            if self._is_tp_attn:
-                attn_output = self.attn(
-                    hidden_states=norm_hidden_states,
-                    attention_mask=attention_mask,
-                    image_rotary_emb=image_rotary_emb,
-                )
-            else:
-                attn_output = self.attn(
-                    hidden_states=norm_hidden_states,
-                    encoder_hidden_states=norm_hidden_states,
-                    attention_mask=attention_mask,
-                    image_rotary_emb=image_rotary_emb,
-                )
+            attn_output = self.attn(
+                hidden_states=norm_hidden_states,
+                attention_mask=attention_mask,
+                image_rotary_emb=image_rotary_emb,
+            )
 
             hidden_states = hidden_states + gate_msa.unsqueeze(1).tanh() * self.norm2(attn_output)
             mlp_output = self.feed_forward(self.ffn_norm1(hidden_states) * (1 + scale_mlp.unsqueeze(1)))
@@ -729,19 +523,11 @@ class TransformerBlock(nn.Module):
         else:
             norm_hidden_states = self.norm1(hidden_states)
 
-            if self._is_tp_attn:
-                attn_output = self.attn(
-                    hidden_states=norm_hidden_states,
-                    attention_mask=attention_mask,
-                    image_rotary_emb=image_rotary_emb,
-                )
-            else:
-                attn_output = self.attn(
-                    hidden_states=norm_hidden_states,
-                    encoder_hidden_states=norm_hidden_states,
-                    attention_mask=attention_mask,
-                    image_rotary_emb=image_rotary_emb,
-                )
+            attn_output = self.attn(
+                hidden_states=norm_hidden_states,
+                attention_mask=attention_mask,
+                image_rotary_emb=image_rotary_emb,
+            )
 
             hidden_states = hidden_states + self.norm2(attn_output)
             mlp_output = self.feed_forward(self.ffn_norm1(hidden_states))
@@ -1116,56 +902,36 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         """Load weights with TP-aware mapping.
 
-        Handles weight mapping for TP-sharded layers:
-        - TP mode: feed_forward.linear_1 + feed_forward.linear_3 -> feed_forward.w13
-        - TP mode: attn.to_q + attn.to_k + attn.to_v -> attn.to_qkv
-        - Non-TP mode: direct loading
+        Handles weight mapping for fused projections:
+        - feed_forward.linear_1 + feed_forward.linear_3 -> feed_forward.w13
+        - attn.to_q + attn.to_k + attn.to_v -> attn.to_qkv
         """
         from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
-        # Convert to list to allow multiple iterations
-        weights_list = list(weights)
+        stacked_params_mapping = [
+            # FFN: gate + up -> w13
+            (".feed_forward.w13.", ".feed_forward.linear_1.", 0),
+            (".feed_forward.w13.", ".feed_forward.linear_3.", 1),
+            # Attention: Q, K, V -> to_qkv
+            (".attn.to_qkv.", ".attn.to_q.", "q"),
+            (".attn.to_qkv.", ".attn.to_k.", "k"),
+            (".attn.to_qkv.", ".attn.to_v.", "v"),
+        ]
+        # Expose for LoRA handling
+        self.stacked_params_mapping = stacked_params_mapping
 
-        tp_size = _get_tp_size()
         params_dict = dict(self.named_parameters())
         loaded_params = set[str]()
 
-        # Log model parameter names for debugging
-        ffn_params = [k for k in params_dict.keys() if "feed_forward" in k]
-        logger.info("--my--debug-- Transformer2DModel.load_weights: tp_size=%s, ffn_params samples=%s",
-                    tp_size, ffn_params[:10] if ffn_params else "none")
-
-        # Stacked params mapping for TP layers (only used when tp_size > 1)
-        stacked_params_mapping = []
-        if tp_size > 1:
-            stacked_params_mapping = [
-                # FFN: gate + up -> w13
-                (".feed_forward.w13.", ".feed_forward.linear_1.", 0),
-                (".feed_forward.w13.", ".feed_forward.linear_3.", 1),
-                # Attention: Q, K, V -> to_qkv
-                (".attn.to_qkv.", ".attn.to_q.", "q"),
-                (".attn.to_qkv.", ".attn.to_k.", "k"),
-                (".attn.to_qkv.", ".attn.to_v.", "v"),
-            ]
-
-        logger.info("--my--debug-- Transformer2DModel.load_weights: stacked_params_mapping count=%s",
-                    len(stacked_params_mapping))
-
-        # Log first few weight names from checkpoint
-        weight_names = [name for name, _ in weights_list]
-        logger.info("--my--debug-- Transformer2DModel.load_weights: checkpoint weight samples=%s",
-                    weight_names[:15])
-
-        for name, loaded_weight in weights_list:
+        for name, loaded_weight in weights:
             # Skip LLM weights if any
             if name.startswith("llm_model."):
                 continue
 
-            # Check for stacked params (TP mode only)
+            # Check for stacked params
             matched = False
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name in name:
-                    # Replace weight name with param name
                     new_name = name.replace(weight_name, param_name)
                     if new_name in params_dict:
                         param = params_dict[new_name]
@@ -1185,5 +951,4 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
                 weight_loader(param, loaded_weight)
                 loaded_params.add(name)
 
-        logger.info("--my--debug-- Transformer2DModel.load_weights: loaded %d params", len(loaded_params))
         return loaded_params
