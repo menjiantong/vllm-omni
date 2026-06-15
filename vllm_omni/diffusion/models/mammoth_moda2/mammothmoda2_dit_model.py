@@ -456,12 +456,6 @@ class TPAttention(nn.Module):
         # Note: encoder_hidden_states is ignored since this is self-attention.
         # The parameter exists for API compatibility with cross-attention patterns.
         batch_size, seq_len, _ = hidden_states.shape
-        logger.info(
-            "--my--debug-- TPAttention.forward: hidden_states.shape=%s, attention_mask=%s, image_rotary_emb=%s",
-            tuple(hidden_states.shape),
-            attention_mask.shape if attention_mask is not None else None,
-            (image_rotary_emb[0].shape, image_rotary_emb[1].shape) if image_rotary_emb else None,
-        )
 
         # QKV projection
         qkv, _ = self.to_qkv(hidden_states)
@@ -960,7 +954,16 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
         params_dict = dict(self.named_parameters())
         loaded_params = set[str]()
 
-        for name, loaded_weight in weights:
+        # Convert to list for debugging (can be removed in production)
+        weights_list = list(weights)
+        logger.info("Transformer2DModel.load_weights: received %d weights", len(weights_list))
+
+        # Log first few weight names for debugging
+        if weights_list:
+            sample_names = [w[0] for w in weights_list[:5]]
+            logger.info("Sample weight names: %s", sample_names)
+
+        for name, loaded_weight in weights_list:
             # Skip LLM weights if any
             if name.startswith("llm_model."):
                 continue
@@ -984,6 +987,11 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
                         weight_loader(param, loaded_weight, shard_id)
                         loaded_params.add(new_name)
                         matched = True
+                    else:
+                        logger.warning(
+                            "Stacked param mapping: %s -> %s not found in model params",
+                            name, new_name
+                        )
                     break
 
             if matched:
@@ -1002,9 +1010,20 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
         # Verify all expected parameters were loaded
         missing_params = set(params_dict.keys()) - loaded_params
         if missing_params:
-            logger.warning(
-                "Some parameters were not loaded from checkpoint: %s",
-                sorted(missing_params)[:10] if len(missing_params) > 10 else sorted(missing_params),
-            )
+            # Filter out non-critical parameters for warning
+            critical_missing = [p for p in missing_params if "norm" not in p and "embedding" not in p]
+            if critical_missing:
+                logger.warning(
+                    "Some critical parameters were not loaded from checkpoint: %s",
+                    sorted(critical_missing)[:20] if len(critical_missing) > 20 else sorted(critical_missing),
+                )
+
+        # Log summary
+        total_params = len(params_dict)
+        loaded_count = len(loaded_params)
+        logger.info(
+            "Transformer2DModel.load_weights: loaded %d/%d parameters (%.1f%%)",
+            loaded_count, total_params, 100.0 * loaded_count / total_params if total_params > 0 else 0
+        )
 
         return loaded_params
