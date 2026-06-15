@@ -935,6 +935,7 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
 
         Handles weight mapping for fused projections:
         - feed_forward.linear_1 + feed_forward.linear_3 -> feed_forward.w13
+        - feed_forward.linear_2 -> feed_forward.w2
         - attn.to_q + attn.to_k + attn.to_v -> attn.to_qkv
         """
         from vllm.model_executor.model_loader.weight_utils import default_weight_loader
@@ -948,6 +949,13 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
             (".attn.to_qkv.", ".attn.to_k.", "k"),
             (".attn.to_qkv.", ".attn.to_v.", "v"),
         ]
+
+        # Simple name remapping (no stacking)
+        name_remapping = [
+            # FFN: linear_2 (down projection) -> w2
+            (".feed_forward.w2.", ".feed_forward.linear_2."),
+        ]
+
         # Expose for LoRA handling
         self.stacked_params_mapping = stacked_params_mapping
 
@@ -1011,28 +1019,40 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
             if matched:
                 continue
 
-            # Regular weight loading
-            if name in params_dict:
-                param = params_dict[name]
+            # Check for simple name remapping
+            remapped_name = name
+            for new_prefix, old_prefix in name_remapping:
+                if old_prefix in name:
+                    remapped_name = name.replace(old_prefix, new_prefix)
+                    logger.info("Name remapping: %s -> %s", name, remapped_name)
+                    break
+
+            # Regular weight loading (use remapped name)
+            if remapped_name in params_dict:
+                param = params_dict[remapped_name]
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
 
-                # Debug: check shapes before loading
-                if name.endswith("to_out.0.weight"):
+                # Debug: check attributes for RowParallelLinear params
+                if "to_out" in remapped_name or remapped_name.endswith("w2.weight"):
+                    input_dim = getattr(param, "input_dim", None)
+                    output_dim = getattr(param, "output_dim", None)
                     logger.info(
-                        "Loading %s: param shape=%s, checkpoint shape=%s",
-                        name, tuple(param.shape), tuple(loaded_weight.shape)
+                        "Loading %s: param shape=%s, checkpoint shape=%s, input_dim=%s, output_dim=%s",
+                        remapped_name, tuple(param.shape), tuple(loaded_weight.shape),
+                        input_dim, output_dim
                     )
 
                 try:
                     weight_loader(param, loaded_weight)
-                    loaded_params.add(name)
-                    logger.debug("Successfully loaded regular param: %s", name)
+                    loaded_params.add(remapped_name)
+                    if "to_out" in remapped_name or remapped_name.endswith("w2.weight"):
+                        logger.info("Successfully loaded %s", remapped_name)
                 except Exception as e:
-                    logger.error("Failed to load %s: %s", name, e)
+                    logger.error("Failed to load %s: %s", remapped_name, e)
                     raise
             else:
                 # Log missing keys for debugging
-                logger.debug("Weight key not found in model: %s", name)
+                logger.debug("Weight key not found in model: %s (original: %s)", remapped_name, name)
 
         # Verify all expected parameters were loaded
         missing_params = set(params_dict.keys()) - loaded_params
