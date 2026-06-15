@@ -1,11 +1,14 @@
 """Stage input processor for MammothModa2 (AR -> DiT)."""
 
+import logging
 from typing import Any
 
 import torch
 from vllm.inputs import TextPrompt
 
 from vllm_omni.inputs.data import OmniTokensPrompt
+
+logger = logging.getLogger(__name__)
 
 
 def ar2dit(
@@ -14,6 +17,8 @@ def ar2dit(
     _requires_multimodal_data: bool = False,
 ) -> list[OmniTokensPrompt]:
     """Convert AR stage outputs to DiT stage inputs."""
+    logger.info("--my--debug-- ar2dit processor called: source_outputs count=%s, prompts type=%s",
+                len(source_outputs) if source_outputs else 0, type(prompts).__name__)
     ar_outputs = source_outputs
 
     # Normalize prompts to list
@@ -21,7 +26,8 @@ def ar2dit(
         prompts = [prompts] if prompts is not None else [{}]
 
     dit_inputs: list[OmniTokensPrompt] = []
-    for ar_output, prompt in zip(ar_outputs, prompts):
+    for idx, (ar_output, prompt) in enumerate(zip(ar_outputs, prompts)):
+        logger.info("--my--debug-- ar2dit processing request %d: ar_output type=%s", idx, type(ar_output).__name__)
         addi_info = prompt["additional_information"]
         image_height = addi_info["image_height"][0]
         image_width = addi_info["image_width"][0]
@@ -38,8 +44,13 @@ def ar2dit(
         gen_token_ids = completion_output.cumulative_token_ids[:-1]
         full_token_ids = prompt_token_ids + gen_token_ids
 
+        logger.info("--my--debug-- ar2dit request %d: prompt_tokens=%d, gen_tokens=%d, total_tokens=%d, image_size=%dx%d",
+                    idx, len(prompt_token_ids), len(gen_token_ids), len(full_token_ids), image_height, image_width)
+
         mm_output = getattr(completion_output, "multimodal_output", None)
         if not isinstance(mm_output, dict) or "latent" not in mm_output:
+            logger.error("--my--debug-- ar2dit: AR output missing latent! mm_output type=%s, keys=%s",
+                        type(mm_output).__name__, list(mm_output.keys()) if isinstance(mm_output, dict) else "N/A")
             raise ValueError(
                 "AR stage output missing latent multimodal output. "
                 f"request_id={getattr(ar_output, 'request_id', None)}, "
@@ -47,6 +58,8 @@ def ar2dit(
             )
         full_hidden_states = mm_output["latent"]
         hidden_total = int(full_hidden_states.shape[0])
+        logger.info("--my--debug-- ar2dit request %d: full_hidden_states.shape=%s, device=%s, dtype=%s",
+                    idx, tuple(full_hidden_states.shape), full_hidden_states.device, full_hidden_states.dtype)
         assert hidden_total == len(prompt_token_ids) + len(gen_token_ids), (
             f"Hidden states length mismatch: expected {len(prompt_token_ids) + len(gen_token_ids)}, got {hidden_total}"
         )
@@ -76,6 +89,9 @@ def ar2dit(
         text_prompt_embeds = text_condition.to(dtype=torch.float32).contiguous()
         image_prompt_embeds = image_condition.to(dtype=torch.float32).contiguous()
 
+        logger.info("--my--debug-- ar2dit request %d: text_prompt_embeds.shape=%s, image_prompt_embeds.shape=%s",
+                    idx, tuple(text_prompt_embeds.shape), tuple(image_prompt_embeds.shape))
+
         additional_information = {
             "text_prompt_embeds": text_prompt_embeds,
             "text_prompt_embeds_shape": list(text_prompt_embeds.shape),
@@ -97,4 +113,5 @@ def ar2dit(
             )
         )
 
+    logger.info("--my--debug-- ar2dit done: returning %d dit_inputs", len(dit_inputs))
     return dit_inputs

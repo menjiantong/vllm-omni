@@ -10,6 +10,7 @@ from transformers import Qwen2Config
 from transformers.models.qwen2_5_vl.processing_qwen2_5_vl import Qwen2_5_VLProcessor
 from vllm.config import CacheConfig, VllmConfig
 from vllm.distributed import get_pp_group
+from vllm.logger import init_logger
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization import QuantizationConfig
@@ -49,6 +50,8 @@ from vllm.transformers_utils.config import (
 from vllm_omni.model_executor.models.output_templates import OmniOutput
 from vllm_omni.model_executor.models.utils import add_prefix_to_loaded_weights
 from vllm_omni.transformers_utils.configs.mammoth_moda2 import Mammothmoda2Config
+
+logger = init_logger(__name__)
 
 
 def moe_enable(moe_type, layer_type, layer_idx) -> bool:
@@ -106,6 +109,12 @@ def moe_forward(
         torch.Tensor: The processed hidden states with the same shape as input (except potentially
         different feature dimension if `D_out != D`).
     """
+    logger.info(
+        "--my--debug-- moe_forward: hidden_states.shape=%s, gen_expert=%s, gen_token_mask=%s",
+        tuple(hidden_states.shape),
+        "present" if gen_expert is not None else "None",
+        f"shape={tuple(gen_token_mask.shape)} sum={gen_token_mask.sum().item()}" if gen_token_mask is not None else "None"
+    )
     if gen_expert is None:
         return und_expert(hidden_states)
 
@@ -256,6 +265,7 @@ class MammothModa2Qwen2ForCausalLM(nn.Module, SupportsPP):
     def __init__(
         self, *, vllm_config: VllmConfig, prefix: str = "", decoder_layer_type: type[nn.Module] = Mammoth2DecoderLayer
     ):
+        logger.info("--my--debug-- MammothModa2Qwen2ForCausalLM.__init__ called with prefix=%s", prefix)
         super().__init__()
 
         hf_config = vllm_config.model_config.hf_config
@@ -426,6 +436,12 @@ class MammothModa2Qwen2ForCausalLM(nn.Module, SupportsPP):
         intermediate_tensors: IntermediateTensors | None = None,
         inputs_embeds: torch.Tensor | None = None,
     ) -> torch.Tensor | IntermediateTensors:
+        logger.info(
+            "--my--debug-- MammothModa2Qwen2ForCausalLM.forward: input_ids.shape=%s, positions.shape=%s, inputs_embeds=%s",
+            tuple(input_ids.shape) if input_ids is not None else None,
+            tuple(positions.shape) if positions is not None else None,
+            tuple(inputs_embeds.shape) if inputs_embeds is not None else None
+        )
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
                 hidden_states = inputs_embeds
@@ -439,6 +455,9 @@ class MammothModa2Qwen2ForCausalLM(nn.Module, SupportsPP):
                 gen_token_mask = None
             else:
                 gen_token_mask = input_ids >= self.gen_vocab_start_index
+            logger.info("--my--debug-- MammothModa2Qwen2ForCausalLM.forward: hidden_states.shape=%s, gen_token_mask sum=%s",
+                        tuple(hidden_states.shape),
+                        gen_token_mask.sum().item() if gen_token_mask is not None else "None")
             residual = None
         else:
             assert intermediate_tensors is not None
@@ -456,10 +475,13 @@ class MammothModa2Qwen2ForCausalLM(nn.Module, SupportsPP):
             return IntermediateTensors(tensors)
 
         hidden_states, _ = self.norm(hidden_states, residual)
-
+        logger.info("--my--debug-- MammothModa2Qwen2ForCausalLM.forward output: hidden_states.shape=%s",
+                    tuple(hidden_states.shape))
         return hidden_states
 
     def compute_logits(self, hidden_states: torch.Tensor) -> torch.Tensor | None:
+        logger.info("--my--debug-- MammothModa2Qwen2ForCausalLM.compute_logits: hidden_states.shape=%s",
+                    tuple(hidden_states.shape) if hidden_states is not None else None)
         if isinstance(self.lm_head, PPMissingLayer):
             return None
         base_logits = self.logits_processor(self.lm_head, hidden_states)
@@ -471,7 +493,10 @@ class MammothModa2Qwen2ForCausalLM(nn.Module, SupportsPP):
         gen_logits = self.gen_logits_processor(self.gen_head, hidden_states)
         if base_logits is None or gen_logits is None:
             return None
-        return torch.cat([base_logits, gen_logits], dim=-1)
+        logits = torch.cat([base_logits, gen_logits], dim=-1)
+        logger.info("--my--debug-- MammothModa2Qwen2ForCausalLM.compute_logits output: base_logits.shape=%s, gen_logits.shape=%s, combined.shape=%s",
+                    tuple(base_logits.shape), tuple(gen_logits.shape), tuple(logits.shape))
+        return logits
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         stacked_params_mapping = [
@@ -563,9 +588,11 @@ class MammothModa2ARForConditionalGeneration(Qwen2_5_VLForConditionalGeneration)
     )
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
+        logger.info("--my--debug-- MammothModa2ARForConditionalGeneration.__init__ called with prefix=%s", prefix)
         # Switch hf_config to the AR sub-config to ensure the Qwen2.5-VL path receives the correct type.
         mammoth_cfg = vllm_config.model_config.hf_config
         ar_hf_config = getattr(mammoth_cfg, "llm_config", mammoth_cfg)
+        logger.info("--my--debug-- MammothModa2ARForConditionalGeneration ar_hf_config type=%s", type(ar_hf_config).__name__)
         ar_vllm_config = vllm_config.with_hf_config(ar_hf_config, architectures=vllm_config.model_config.architectures)
         # Initialize multi-modal components like the vision tower first.
         super().__init__(vllm_config=ar_vllm_config, prefix=prefix)
@@ -585,6 +612,7 @@ class MammothModa2ARForConditionalGeneration(Qwen2_5_VLForConditionalGeneration)
         # Constraint logic depends on per-step sampling_metadata + runtime_additional_information.
         # These are passed by the vllm-omni runner via kwargs, so caching them in the model is sufficient.
         self._last_runtime_additional_information: list[dict[str, Any]] | None = None
+        logger.info("--my--debug-- MammothModa2ARForConditionalGeneration.__init__ done")
 
     def _apply_t2i_token_constraints(self, logits: torch.Tensor) -> torch.Tensor:
         """Applies per-request token constraints.
@@ -644,6 +672,13 @@ class MammothModa2ARForConditionalGeneration(Qwen2_5_VLForConditionalGeneration)
         inputs_embeds: torch.Tensor | None = None,
         **kwargs: Any,
     ):
+        logger.info(
+            "--my--debug-- MammothModa2ARForConditionalGeneration.forward: input_ids.shape=%s, positions.shape=%s, inputs_embeds=%s, kwargs keys=%s",
+            tuple(input_ids.shape) if input_ids is not None else None,
+            tuple(positions.shape) if positions is not None else None,
+            tuple(inputs_embeds.shape) if inputs_embeds is not None else None,
+            list(kwargs.keys())
+        )
         # vllm-omni runner passes sampling_metadata and runtime_additional_information
         # in each forward step. compute_logits is called immediately after
         # forward, so caching here enables step-by-step dynamic token constraints.
@@ -657,6 +692,7 @@ class MammothModa2ARForConditionalGeneration(Qwen2_5_VLForConditionalGeneration)
             **kwargs,
         )
         if isinstance(hidden_states, IntermediateTensors) and not get_pp_group().is_last_rank:
+            logger.info("--my--debug-- MammothModa2ARForConditionalGeneration.forward returning IntermediateTensors (not last rank)")
             return hidden_states
         # NOTE: gpu_model_runner._dummy_run performs hidden_states[logit_indices] after forward.
         # We must ensure text_hidden_states is a torch.Tensor to avoid errors when
@@ -671,6 +707,10 @@ class MammothModa2ARForConditionalGeneration(Qwen2_5_VLForConditionalGeneration)
             text_hidden_states = hidden_states
             out_intermediate_tensors = None
 
+        logger.info(
+            "--my--debug-- MammothModa2ARForConditionalGeneration.forward output: text_hidden_states.shape=%s",
+            tuple(text_hidden_states.shape) if text_hidden_states is not None else None
+        )
         return OmniOutput(
             text_hidden_states=text_hidden_states,
             multimodal_outputs={},
@@ -678,11 +718,15 @@ class MammothModa2ARForConditionalGeneration(Qwen2_5_VLForConditionalGeneration)
         )
 
     def compute_logits(self, hidden_states: torch.Tensor | OmniOutput):
+        logger.info("--my--debug-- MammothModa2ARForConditionalGeneration.compute_logits: hidden_states type=%s",
+                    type(hidden_states).__name__)
         if isinstance(hidden_states, OmniOutput):
             hidden_states = hidden_states.text_hidden_states
         logits = super().compute_logits(hidden_states)
         if isinstance(logits, torch.Tensor):
             logits = self._apply_t2i_token_constraints(logits)
+        logger.info("--my--debug-- MammothModa2ARForConditionalGeneration.compute_logits output: logits.shape=%s",
+                    tuple(logits.shape) if logits is not None and hasattr(logits, 'shape') else None)
         return logits
 
 
@@ -701,6 +745,7 @@ class MammothModa2ForConditionalGeneration(nn.Module, SupportsMultiModal, Suppor
     merge_by_field_config = True
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
+        logger.info("--my--debug-- MammothModa2ForConditionalGeneration.__init__ called with prefix=%s", prefix)
         super().__init__()
         # Consistent with Qwen2_5OmniForConditionalGeneration: instance-level flag.
         self.have_multimodal_outputs = True
@@ -708,6 +753,7 @@ class MammothModa2ForConditionalGeneration(nn.Module, SupportsMultiModal, Suppor
         cfg = vllm_config.model_config.hf_config
         self.model_stage = vllm_config.model_config.model_stage
         self.multimodal_config = vllm_config.model_config.multimodal_config
+        logger.info("--my--debug-- MammothModa2ForConditionalGeneration model_stage=%s", self.model_stage)
 
         # For debugging/alignment with qwen2.5-omni: explicitly nullify unused stages.
         self.ar = None
@@ -786,18 +832,29 @@ class MammothModa2ForConditionalGeneration(nn.Module, SupportsMultiModal, Suppor
         raise NotImplementedError("Underlying model does not implement get_input_embeddings")
 
     def forward(self, *args, **kwargs) -> OmniOutput | torch.Tensor:
+        logger.info("--my--debug-- MammothModa2ForConditionalGeneration.forward called, model_stage=%s, kwargs keys=%s",
+                    self.model_stage, list(kwargs.keys()))
         out = self.model(*args, **kwargs)
         if isinstance(out, OmniOutput):
+            logger.info("--my--debug-- MammothModa2ForConditionalGeneration.forward output OmniOutput: text_hidden_states.shape=%s, multimodal_outputs keys=%s",
+                        tuple(out.text_hidden_states.shape) if out.text_hidden_states is not None else None,
+                        list(out.multimodal_outputs.keys()) if isinstance(out.multimodal_outputs, dict) else [])
             return out
         if isinstance(out, list):
             out = out[0]
+        logger.info("--my--debug-- MammothModa2ForConditionalGeneration.forward output tensor: shape=%s", tuple(out.shape) if hasattr(out, 'shape') else type(out))
         return OmniOutput(text_hidden_states=out, multimodal_outputs={}, intermediate_tensors=None)
 
     def compute_logits(self, hidden_states: torch.Tensor | OmniOutput, *args, **kwargs):
+        logger.info("--my--debug-- MammothModa2ForConditionalGeneration.compute_logits called, hidden_states type=%s",
+                    type(hidden_states).__name__)
         if isinstance(hidden_states, OmniOutput):
             hidden_states = hidden_states.text_hidden_states
         if hasattr(self.model, "compute_logits"):
-            return self.model.compute_logits(hidden_states)
+            logits = self.model.compute_logits(hidden_states)
+            logger.info("--my--debug-- MammothModa2ForConditionalGeneration.compute_logits output: shape=%s",
+                        tuple(logits.shape) if logits is not None and hasattr(logits, 'shape') else None)
+            return logits
         return None
 
     def get_dummy_runtime_additional_information(self, num_reqs: int) -> list[dict[str, object]]:

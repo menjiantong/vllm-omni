@@ -9,10 +9,13 @@ from diffusers.utils.torch_utils import randn_tensor
 from torch import nn
 from transformers.models.qwen2.modeling_qwen2 import Qwen2RMSNorm
 from vllm.config import VllmConfig
+from vllm.logger import init_logger
 from vllm.model_executor.models.utils import AutoWeightsLoader, WeightsMapper
 
 from vllm_omni.model_executor.models.output_templates import OmniOutput
 from vllm_omni.transformers_utils.configs.mammoth_moda2 import Mammothmoda2Config
+
+logger = init_logger(__name__)
 
 from .mammothmoda2_dit_model import SimpleQFormerImageRefiner, Transformer2DModel
 from .rope_real import RotaryPosEmbedReal
@@ -38,6 +41,8 @@ class MammothModa2DiTPipeline(nn.Module):
     )
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
+        logger.info("--my--debug-- MammothModa2DiTPipeline.__init__ called with: vllm_config.model_config.hf_config type=%s, prefix=%s",
+                    type(vllm_config.model_config.hf_config).__name__, prefix)
         super().__init__()
         del prefix
 
@@ -144,6 +149,8 @@ class MammothModa2DiTPipeline(nn.Module):
         inputs_embeds: torch.Tensor | None = None,
         **kwargs: Any,  # noqa: ARG002
     ) -> OmniOutput:
+        logger.info("--my--debug-- MammothModa2DiTPipeline.forward called with: inputs_embeds=%s, kwargs keys=%s",
+                    inputs_embeds.shape if inputs_embeds is not None else None, list(kwargs.keys()))
         runtime_addi = kwargs.get("runtime_additional_information", None)
         info = runtime_addi[0]
         text_cond = info["text_prompt_embeds"]
@@ -304,5 +311,10 @@ class MammothModa2DiTPipeline(nn.Module):
         return None
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+        """Load weights using AutoWeightsLoader.
+
+        AutoWeightsLoader will recursively call load_weights on submodules,
+        so Transformer2DModel.load_weights will handle TP weight mapping automatically.
+        """
         loader = AutoWeightsLoader(self)
         return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
