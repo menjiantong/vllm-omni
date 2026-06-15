@@ -333,7 +333,7 @@ class SimpleQFormerImageRefiner(nn.Module):
                             embed_dim=hidden_size, num_heads=self.num_heads, dropout=dropout, batch_first=True
                         ),
                         ln_ffn=Qwen2RMSNorm(hidden_size, eps=norm_eps),
-                        ffn=SimpleLuminaFeedForward(dim=hidden_size, inner_dim=4 * hidden_size),
+                        ffn=LuminaFeedForward(dim=hidden_size, inner_dim=4 * hidden_size),
                     )
                 )
             )
