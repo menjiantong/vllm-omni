@@ -496,6 +496,10 @@ class TPAttention(nn.Module):
         # Reshape back
         hidden_states = hidden_states.flatten(2, 3)
 
+        # Zero out padding tokens (consistent with original AttnProcessor behavior)
+        if attention_mask is not None:
+            hidden_states = hidden_states * attention_mask.unsqueeze(-1).to(hidden_states.dtype)
+
         # Output projection
         hidden_states = self.to_out[0](hidden_states)
 
@@ -968,7 +972,15 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
                     new_name = name.replace(weight_name, param_name)
                     if new_name in params_dict:
                         param = params_dict[new_name]
-                        weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                        # For stacked params, weight_loader must exist (TP layers)
+                        # Don't use default_weight_loader as it doesn't support shard_id
+                        weight_loader = getattr(param, "weight_loader", None)
+                        if weight_loader is None:
+                            raise ValueError(
+                                f"Parameter {new_name} has no weight_loader but is in "
+                                f"stacked_params_mapping. This indicates a mismatch between "
+                                f"the model definition and weight loading logic."
+                            )
                         weight_loader(param, loaded_weight, shard_id)
                         loaded_params.add(new_name)
                         matched = True
@@ -983,5 +995,16 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
                 loaded_params.add(name)
+            else:
+                # Log missing keys for debugging
+                logger.debug("Weight key not found in model: %s", name)
+
+        # Verify all expected parameters were loaded
+        missing_params = set(params_dict.keys()) - loaded_params
+        if missing_params:
+            logger.warning(
+                "Some parameters were not loaded from checkpoint: %s",
+                sorted(missing_params)[:10] if len(missing_params) > 10 else sorted(missing_params),
+            )
 
         return loaded_params
