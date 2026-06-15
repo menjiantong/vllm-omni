@@ -963,6 +963,11 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
             sample_names = [w[0] for w in weights_list[:5]]
             logger.info("Sample weight names: %s", sample_names)
 
+        # Check for attention weights specifically
+        attn_weights = [w for w in weights_list if "attn" in w[0] and "norm" not in w[0]]
+        if attn_weights:
+            logger.info("Attention weights in this batch: %s", [w[0] for w in attn_weights[:10]])
+
         for name, loaded_weight in weights_list:
             # Skip LLM weights if any
             if name.startswith("llm_model."):
@@ -973,6 +978,10 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name in name:
                     new_name = name.replace(weight_name, param_name)
+                    logger.info(
+                        "Stacked mapping: %s -> %s (shard_id=%s), new_name in params_dict: %s",
+                        name, new_name, shard_id, new_name in params_dict
+                    )
                     if new_name in params_dict:
                         param = params_dict[new_name]
                         # For stacked params, weight_loader must exist (TP layers)
@@ -984,9 +993,14 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
                                 f"stacked_params_mapping. This indicates a mismatch between "
                                 f"the model definition and weight loading logic."
                             )
-                        weight_loader(param, loaded_weight, shard_id)
-                        loaded_params.add(new_name)
-                        matched = True
+                        try:
+                            weight_loader(param, loaded_weight, shard_id)
+                            loaded_params.add(new_name)
+                            logger.info("Successfully loaded stacked param: %s", new_name)
+                            matched = True
+                        except Exception as e:
+                            logger.error("Failed to load stacked param %s: %s", new_name, e)
+                            raise
                     else:
                         logger.warning(
                             "Stacked param mapping: %s -> %s not found in model params",
@@ -1001,8 +1015,21 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
             if name in params_dict:
                 param = params_dict[name]
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
-                weight_loader(param, loaded_weight)
-                loaded_params.add(name)
+
+                # Debug: check shapes before loading
+                if name.endswith("to_out.0.weight"):
+                    logger.info(
+                        "Loading %s: param shape=%s, checkpoint shape=%s",
+                        name, tuple(param.shape), tuple(loaded_weight.shape)
+                    )
+
+                try:
+                    weight_loader(param, loaded_weight)
+                    loaded_params.add(name)
+                    logger.debug("Successfully loaded regular param: %s", name)
+                except Exception as e:
+                    logger.error("Failed to load %s: %s", name, e)
+                    raise
             else:
                 # Log missing keys for debugging
                 logger.debug("Weight key not found in model: %s", name)
