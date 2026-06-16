@@ -20,6 +20,9 @@ stage_args:
       trust_remote_code: true
       engine_output_type: latent
       enable_prefix_caching: false
+      profiler_config:
+        profiler: torch
+        torch_profiler_dir: ./vllm_profile
     final_output: false
 
   - stage_id: 1
@@ -36,6 +39,9 @@ stage_args:
       trust_remote_code: true
       engine_output_type: image
       enable_prefix_caching: false
+      profiler_config:
+        profiler: torch
+        torch_profiler_dir: ./vllm_profile
     engine_input_source: [0]
     custom_process_input_func: vllm_omni.model_executor.stage_input_processors.mammoth_moda2.ar2dit
     final_output: true
