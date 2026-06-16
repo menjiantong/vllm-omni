@@ -17,6 +17,7 @@ from vllm.model_executor.layers.linear import (
     QKVParallelLinear,
     RowParallelLinear,
 )
+from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from .rope_real import RotaryPosEmbedReal, apply_real_rotary_emb
 
@@ -914,15 +915,13 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
         return output
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        """Load weights with TP-aware mapping.
+        """Load weights with TP/quantization-aware mapping.
 
         Handles weight mapping for fused projections:
         - feed_forward.linear_1 + feed_forward.linear_3 -> feed_forward.w13
         - feed_forward.linear_2 -> feed_forward.w2
         - attn.to_q + attn.to_k + attn.to_v -> attn.to_qkv
         """
-        from vllm.model_executor.model_loader.weight_utils import default_weight_loader
-
         stacked_params_mapping = [
             # FFN: gate + up -> w13
             (".feed_forward.w13.", ".feed_forward.linear_1.", 0),
@@ -945,46 +944,34 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
         params_dict = dict(self.named_parameters())
         loaded_params = set[str]()
 
-        # Convert to list for debugging (can be removed in production)
-        weights_list = list(weights)
-
-        for name, loaded_weight in weights_list:
+        for name, loaded_weight in weights:
             # Skip LLM weights if any
             if name.startswith("llm_model."):
                 continue
 
             # Check for stacked params
-            matched = False
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name in name:
-                    new_name = name.replace(weight_name, param_name)
-                    if new_name in params_dict:
-                        param = params_dict[new_name]
-                        weight_loader = getattr(param, "weight_loader", None)
-                        weight_loader(param, loaded_weight, shard_id)
-                        loaded_params.add(new_name)
-                        matched = True
-                    else:
-                        logger.warning("Stacked param mapping: %s -> %s not found in model params", name, new_name)
+                    name = name.replace(weight_name, param_name)
+                    param = params_dict[name]
+                    weight_loader = param.weight_loader
+                    weight_loader(param, loaded_weight, shard_id)
                     break
-
-            if matched:
-                continue
-
-            # Check for simple name remapping
-            remapped_name = name
-            for new_prefix, old_prefix in name_remapping:
-                if old_prefix in name:
-                    remapped_name = name.replace(old_prefix, new_prefix)
-                    break
-
-            # Regular weight loading (use remapped name)
-            if remapped_name in params_dict:
-                param = params_dict[remapped_name]
-                weight_loader = getattr(param, "weight_loader", default_weight_loader)
-                weight_loader(param, loaded_weight)
-                loaded_params.add(remapped_name)
             else:
-                logger.warning("Weight key not found in model: %s (original: %s)", remapped_name, name)
+                # Check for simple name remapping
+                for new_prefix, old_prefix in name_remapping:
+                    if old_prefix in name:
+                        name = name.replace(old_prefix, new_prefix)
+                        break
+
+                # Regular weight loading
+                if name in params_dict:
+                    param = params_dict[name]
+                    weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                    weight_loader(param, loaded_weight)
+                else:
+                    logger.warning("Weight key not found in model: %s", name)
+                    continue
+            loaded_params.add(name)
 
         return loaded_params
