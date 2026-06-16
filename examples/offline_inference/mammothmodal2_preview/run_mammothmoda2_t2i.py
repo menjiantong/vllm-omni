@@ -206,6 +206,8 @@ def main() -> None:
         trust_remote_code=args.trust_remote_code,
         tensor_parallel_size=args.tensor_parallel_size,
     )
+    logger.info("[Profiler] Starting profiling...")
+    omni.start_profile()
     try:
         ar_sampling = SamplingParams(
             temperature=1.0,
@@ -251,6 +253,17 @@ def main() -> None:
         logger.info("Post-processing and saving image(s)...")
         for path in _save_images(_collect_images(outputs), args.out):
             logger.info(f"Saved: {path}")
+
+        logger.info("[Profiler] Stopping profiler and collecting results...")
+        profile_results = omni.stop_profile()
+        if profile_results and isinstance(profile_results, dict):
+            traces = profile_results.get("traces", [])
+            if traces:
+                print("\n" + "=" * 60)
+                print("PROFILING RESULTS:")
+                for rank, trace in enumerate(traces):
+                    print(f"Rank {rank}: {trace}")
+                print("=" * 60)
     finally:
         omni.close()
 
