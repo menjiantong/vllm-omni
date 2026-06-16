@@ -2,14 +2,12 @@
 # Stage 0: AR  (multimodal understanding + latent generation)
 # Stage 1: DiT (latent → image)
 #
-# For text/image understanding tasks (text output only), use mammoth_moda2_ar.yaml.
-# For TP=2, use mammoth_moda2_tp2.yaml.
-# For TP=4, use mammoth_moda2_tp4.yaml.
+# Usage: --tensor-parallel-size 2
 
 stage_args:
   - stage_id: 0
     runtime:
-      devices: "0"
+      devices: "0,1"
     engine_args:
       model_stage: ar
       max_num_seqs: 100
@@ -26,7 +24,7 @@ stage_args:
 
   - stage_id: 1
     runtime:
-      devices: "0"
+      devices: "0,1"
     engine_args:
       model_stage: dit
       max_num_seqs: 1
@@ -39,7 +37,7 @@ stage_args:
       engine_output_type: image
       enable_prefix_caching: false
       parallel_config:
-        tensor_parallel_size: 1
+        tensor_parallel_size: 2
     engine_input_source: [0]
     custom_process_input_func: vllm_omni.model_executor.stage_input_processors.mammoth_moda2.ar2dit
     final_output: true
