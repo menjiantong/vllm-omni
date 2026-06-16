@@ -117,6 +117,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--out", type=str, default="output.png", help="Path to save the generated image.")
     p.add_argument("--trust-remote-code", action="store_true", help="Trust remote code when loading the model.")
+    p.add_argument(
+        "--tensor-parallel-size",
+        type=int,
+        default=1,
+        help="Number of GPUs used for tensor parallelism (TP) inside the DiT.",
+    )
     args = p.parse_args()
     if not args.prompt:
         args.prompt = ["A stylish woman with sunglasses riding a motorcycle in NYC."]
@@ -194,7 +200,12 @@ def main() -> None:
     expected_grid_tokens = ar_height * (ar_width + 1)
 
     logger.info("Initializing Omni pipeline...")
-    omni = Omni(model=args.model, stage_configs_path=args.stage_config, trust_remote_code=args.trust_remote_code)
+    omni = Omni(
+        model=args.model,
+        stage_configs_path=args.stage_config,
+        trust_remote_code=args.trust_remote_code,
+        tensor_parallel_size=args.tensor_parallel_size,
+    )
     try:
         ar_sampling = SamplingParams(
             temperature=1.0,
