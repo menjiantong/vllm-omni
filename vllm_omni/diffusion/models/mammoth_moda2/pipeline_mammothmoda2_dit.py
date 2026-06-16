@@ -46,13 +46,18 @@ class MammothModa2DiTPipeline(nn.Module):
             raise TypeError(f"Expected Mammothmoda2Config, got {type(hf_config)}")
 
         self.config = hf_config
+        quant_config = vllm_config.quant_config
 
         # --- Build DiT / VAE modules (names must match checkpoint keys) ---
         if self.config.gen_vae_config is None or self.config.gen_dit_config is None:
             raise ValueError("Mammothmoda2Config.gen_vae_config / gen_dit_config must not be None")
 
         self.gen_vae = AutoencoderKL.from_config(self.config.gen_vae_config)
-        self.gen_transformer = Transformer2DModel.from_config(self.config.gen_dit_config)
+        self.gen_transformer = Transformer2DModel.from_config(
+            self.config.gen_dit_config,
+            quant_config=quant_config,
+            prefix="gen_transformer",
+        )
 
         # llm_config is a Mammothmoda2Qwen2_5_VLConfig which has nested text_config
         llm_hidden_size = int(

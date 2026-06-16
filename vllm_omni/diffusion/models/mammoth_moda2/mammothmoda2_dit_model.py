@@ -1,5 +1,6 @@
 import math
 from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
@@ -15,11 +16,15 @@ from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.linear import (
     MergedColumnParallelLinear,
     QKVParallelLinear,
+    ReplicatedLinear,
     RowParallelLinear,
 )
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from .rope_real import RotaryPosEmbedReal, apply_real_rotary_emb
+
+if TYPE_CHECKING:
+    from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
 
 logger = init_logger(__name__)
 
@@ -96,6 +101,10 @@ def _get_tp_size() -> int:
     return get_tensor_model_parallel_world_size()
 
 
+def _join_prefix(prefix: str, name: str) -> str:
+    return f"{prefix}.{name}" if prefix else name
+
+
 class LuminaRMSNormZero(nn.Module):
     """
     Norm layer adaptive RMS normalization zero.
@@ -112,10 +121,14 @@ class LuminaRMSNormZero(nn.Module):
     ):
         super().__init__()
         self.silu = nn.SiLU()
-        self.linear = nn.Linear(
+        # Modulation linear kept at full precision — produces scale/gate values
+        # that are precision-sensitive (see #2728).
+        self.linear = ReplicatedLinear(
             min(embedding_dim, 1024),
             4 * embedding_dim,
             bias=True,
+            quant_config=None,
+            return_bias=False,
         )
 
         self.norm = Qwen2RMSNorm(embedding_dim, eps=norm_eps)
@@ -147,6 +160,8 @@ class LuminaFeedForward(nn.Module):
         inner_dim: int,
         multiple_of: int | None = 256,
         ffn_dim_multiplier: float | None = None,
+        quant_config: "QuantizationConfig | None" = None,
+        prefix: str = "",
     ):
         super().__init__()
 
@@ -160,6 +175,8 @@ class LuminaFeedForward(nn.Module):
             [inner_dim, inner_dim],  # [gate_dim, up_dim]
             bias=False,
             return_bias=False,
+            quant_config=quant_config,
+            prefix=_join_prefix(prefix, "w13"),
         )
         self.act = SiluAndMul()
         self.w2 = RowParallelLinear(
@@ -168,6 +185,8 @@ class LuminaFeedForward(nn.Module):
             bias=False,
             input_is_parallel=True,
             return_bias=False,
+            quant_config=quant_config,
+            prefix=_join_prefix(prefix, "w2"),
         )
 
     def forward(self, x):
@@ -195,7 +214,15 @@ class LuminaLayerNormContinuous(nn.Module):
         super().__init__()
 
         self.silu = nn.SiLU()
-        self.linear_1 = nn.Linear(conditioning_embedding_dim, embedding_dim, bias=bias)
+        # Conditioning projection kept at full precision — small layer that
+        # produces scale values for adaptive normalization (see #2728).
+        self.linear_1 = ReplicatedLinear(
+            conditioning_embedding_dim,
+            embedding_dim,
+            bias=bias,
+            quant_config=None,
+            return_bias=False,
+        )
 
         if norm_type == "layer_norm":
             self.norm = nn.LayerNorm(embedding_dim, eps, elementwise_affine, bias)
@@ -206,7 +233,15 @@ class LuminaLayerNormContinuous(nn.Module):
 
         self.linear_2 = None
         if out_dim is not None:
-            self.linear_2 = nn.Linear(embedding_dim, out_dim, bias=bias)
+            # Output projection kept at full precision — produces output
+            # latent; precision-sensitive (see #2728).
+            self.linear_2 = ReplicatedLinear(
+                embedding_dim,
+                out_dim,
+                bias=bias,
+                quant_config=None,
+                return_bias=False,
+            )
 
     def forward(
         self,
@@ -400,6 +435,8 @@ class TPAttention(nn.Module):
         num_heads: int,
         num_kv_heads: int,
         eps: float = 1e-5,
+        quant_config: "QuantizationConfig | None" = None,
+        prefix: str = "",
     ):
         super().__init__()
         self.dim = dim
@@ -414,6 +451,8 @@ class TPAttention(nn.Module):
             total_num_heads=num_heads,
             total_num_kv_heads=num_kv_heads,
             bias=False,
+            quant_config=quant_config,
+            prefix=_join_prefix(prefix, "to_qkv"),
         )
 
         # QK normalization
@@ -429,6 +468,8 @@ class TPAttention(nn.Module):
                     bias=False,
                     input_is_parallel=True,
                     return_bias=False,
+                    quant_config=quant_config,
+                    prefix=_join_prefix(prefix, "to_out.0"),
                 ),
                 nn.Identity(),  # placeholder for dropout
             ]
@@ -506,6 +547,8 @@ class TransformerBlock(nn.Module):
         ffn_dim_multiplier: float,
         norm_eps: float,
         modulation: bool = True,
+        quant_config: "QuantizationConfig | None" = None,
+        prefix: str = "",
     ) -> None:
         """Initialize the transformer block."""
         super().__init__()
@@ -517,11 +560,18 @@ class TransformerBlock(nn.Module):
             num_heads=num_attention_heads,
             num_kv_heads=num_kv_heads,
             eps=1e-5,
+            quant_config=quant_config,
+            prefix=_join_prefix(prefix, "attn"),
         )
 
         # Initialize feed-forward network
         self.feed_forward = LuminaFeedForward(
-            dim=dim, inner_dim=4 * dim, multiple_of=multiple_of, ffn_dim_multiplier=ffn_dim_multiplier
+            dim=dim,
+            inner_dim=4 * dim,
+            multiple_of=multiple_of,
+            ffn_dim_multiplier=ffn_dim_multiplier,
+            quant_config=quant_config,
+            prefix=_join_prefix(prefix, "feed_forward"),
         )
 
         # Initialize normalization layers
@@ -573,6 +623,11 @@ class TransformerBlock(nn.Module):
 class Transformer2DModel(ModelMixin, ConfigMixin):
     """MammothModa2 DiT transformer"""
 
+    packed_modules_mapping = {
+        "to_qkv": ["to_q", "to_k", "to_v"],
+        "w13": ["linear_1", "linear_3"],
+    }
+
     @register_to_config
     def __init__(
         self,
@@ -591,6 +646,8 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
         axes_lens: tuple[int, int, int] = (300, 512, 512),
         text_feat_dim: int = 1024,
         timestep_scale: float = 1.0,
+        quant_config: "QuantizationConfig | None" = None,
+        prefix: str = "",
     ) -> None:
         """Initialize the  transformer model."""
         super().__init__()
@@ -638,14 +695,22 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
             patch_size=patch_size,
         )
 
-        self.x_embedder = nn.Linear(
-            in_features=patch_size * patch_size * in_channels,
-            out_features=hidden_size,
+        # Patch embedders are small precision-sensitive entry layers;
+        # keep at full precision (see #2728).
+        self.x_embedder = ReplicatedLinear(
+            input_size=patch_size * patch_size * in_channels,
+            output_size=hidden_size,
+            bias=True,
+            quant_config=None,
+            return_bias=False,
         )
 
-        self.ref_image_patch_embedder = nn.Linear(
-            in_features=patch_size * patch_size * in_channels,
-            out_features=hidden_size,
+        self.ref_image_patch_embedder = ReplicatedLinear(
+            input_size=patch_size * patch_size * in_channels,
+            output_size=hidden_size,
+            bias=True,
+            quant_config=None,
+            return_bias=False,
         )
 
         self.time_caption_embed = Lumina2CombinedTimestepCaptionEmbedding(
@@ -666,8 +731,10 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
                     ffn_dim_multiplier,
                     norm_eps,
                     modulation=True,
+                    quant_config=quant_config,
+                    prefix=_join_prefix(prefix, f"noise_refiner.{i}"),
                 )
-                for _ in range(num_refiner_layers)
+                for i in range(num_refiner_layers)
             ]
         )
 
@@ -681,8 +748,10 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
                     ffn_dim_multiplier,
                     norm_eps,
                     modulation=True,
+                    quant_config=quant_config,
+                    prefix=_join_prefix(prefix, f"ref_image_refiner.{i}"),
                 )
-                for _ in range(num_refiner_layers)
+                for i in range(num_refiner_layers)
             ]
         )
 
@@ -696,8 +765,10 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
                     ffn_dim_multiplier,
                     norm_eps,
                     modulation=False,
+                    quant_config=quant_config,
+                    prefix=_join_prefix(prefix, f"context_refiner.{i}"),
                 )
-                for _ in range(num_refiner_layers)
+                for i in range(num_refiner_layers)
             ]
         )
 
@@ -712,8 +783,10 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
                     ffn_dim_multiplier,
                     norm_eps,
                     modulation=True,
+                    quant_config=quant_config,
+                    prefix=_join_prefix(prefix, f"layers.{i}"),
                 )
-                for _ in range(num_layers)
+                for i in range(num_layers)
             ]
         )
 
