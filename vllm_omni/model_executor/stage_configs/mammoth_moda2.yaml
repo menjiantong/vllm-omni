@@ -6,7 +6,6 @@
 
 stage_args:
   - stage_id: 0
-    stage_type: llm
     runtime:
       devices: "0"
     engine_args:
@@ -24,13 +23,12 @@ stage_args:
     final_output: false
 
   - stage_id: 1
-    stage_type: diffusion
     runtime:
       devices: "0"
     engine_args:
       model_stage: dit
       max_num_seqs: 1
-      model_class_name: MammothModa2DiTPipeline
+      model_arch: MammothModa2ForConditionalGeneration
       worker_cls: vllm_omni.worker.gpu_generation_worker.GPUGenerationWorker
       scheduler_cls: vllm_omni.core.sched.omni_generation_scheduler.OmniGenerationScheduler
       gpu_memory_utilization: 0.3

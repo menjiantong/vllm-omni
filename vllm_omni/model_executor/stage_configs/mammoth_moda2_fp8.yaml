@@ -6,7 +6,6 @@
 
 stage_args:
   - stage_id: 0
-    stage_type: llm
     runtime:
       devices: "0"
     engine_args:
@@ -24,13 +23,12 @@ stage_args:
     final_output: false
 
   - stage_id: 1
-    stage_type: diffusion
     runtime:
       devices: "0"
     engine_args:
       model_stage: dit
       max_num_seqs: 1
-      model_class_name: MammothModa2DiTPipeline
+      model_arch: MammothModa2ForConditionalGeneration
       worker_cls: vllm_omni.worker.gpu_generation_worker.GPUGenerationWorker
       scheduler_cls: vllm_omni.core.sched.omni_generation_scheduler.OmniGenerationScheduler
       gpu_memory_utilization: 0.3
@@ -38,10 +36,8 @@ stage_args:
       trust_remote_code: true
       engine_output_type: image
       enable_prefix_caching: false
-      # FP8 quantization for DiT transformer
-      quantization_config:
-        quant_method: fp8
-        activation_scheme: dynamic
+      # FP8 quantization for DiT transformer (vLLM-style)
+      quantization: fp8
     engine_input_source: [0]
     custom_process_input_func: vllm_omni.model_executor.stage_input_processors.mammoth_moda2.ar2dit
     final_output: true
