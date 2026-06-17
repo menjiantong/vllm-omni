@@ -8,9 +8,27 @@ Workflow:
    and VAE decoding to produce the final image.
 
 Example Usage:
-    uv run python examples/offline_inference/run_mammothmoda2_t2i.py \
+    # Basic usage (BF16, no quantization)
+    uv run python examples/offline_inference/mammothmodal2_preview/run_mammothmoda2_t2i.py \
         --model path/to/MammothModa2-Preview \
         --stage-config vllm_omni/model_executor/stage_configs/mammoth_moda2.yaml \
+        --prompt "A stylish woman riding a motorcycle in NYC, movie poster style" \
+        --out output.png
+
+    # FP8 quantization
+    uv run python examples/offline_inference/mammothmodal2_preview/run_mammothmoda2_t2i.py \
+        --model path/to/MammothModa2-Preview \
+        --stage-config vllm_omni/model_executor/stage_configs/mammoth_moda2.yaml \
+        --quantization fp8 \
+        --prompt "A stylish woman riding a motorcycle in NYC, movie poster style" \
+        --out output.png
+
+    # FP8 quantization with ignored layers
+    uv run python examples/offline_inference/mammothmodal2_preview/run_mammothmoda2_t2i.py \
+        --model path/to/MammothModa2-Preview \
+        --stage-config vllm_omni/model_executor/stage_configs/mammoth_moda2.yaml \
+        --quantization fp8 \
+        --ignored-layers "to_out,proj_out" \
         --prompt "A stylish woman riding a motorcycle in NYC, movie poster style" \
         --out output.png
 """
@@ -123,6 +141,33 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Number of GPUs used for tensor parallelism (TP) inside the DiT.",
     )
+    # ==================== Quantization parameters ====================
+    p.add_argument(
+        "--quantization",
+        type=str,
+        default=None,
+        choices=["fp8", "int8"],
+        help="Quantization method for the DiT transformer. "
+        "Options: 'fp8' (FP8 W8A8 on Ada/Hopper), 'int8' (Int8 W8A8). "
+        "Default: None (no quantization, uses BF16).",
+    )
+    p.add_argument(
+        "--ignored-layers",
+        type=str,
+        default=None,
+        help="Comma-separated list of layer name patterns to skip quantization. "
+        "Only used when --quantization is set. "
+        "Available layers: to_qkv, to_out, add_kv_proj, to_add_out, img_mlp, txt_mlp, proj_out. "
+        "Example: --ignored-layers 'to_out,proj_out'",
+    )
+    p.add_argument(
+        "--activation-scheme",
+        type=str,
+        default="dynamic",
+        choices=["dynamic", "static"],
+        help="Activation quantization scheme for FP8. 'dynamic' uses dynamic per-token quantization, "
+        "'static' uses static per-tensor quantization (requires calibration). Default: dynamic.",
+    )
     args = p.parse_args()
     if not args.prompt:
         args.prompt = ["A stylish woman with sunglasses riding a motorcycle in NYC."]
@@ -185,6 +230,30 @@ def _save_images(images: list[torch.Tensor], out_path: str) -> list[str]:
     return paths
 
 
+def _build_quantization_config(args: argparse.Namespace) -> dict | None:
+    """Build quantization config dict for diffusion stage (DiT).
+
+    For multi-stage models like MammothModa2, we need to use diffusion_quantization_config
+    to pass quantization settings to the DiT stage.
+    """
+    if not args.quantization:
+        return None
+
+    config: dict = {
+        "quant_method": args.quantization,
+    }
+
+    if args.activation_scheme:
+        config["activation_scheme"] = args.activation_scheme
+
+    if args.ignored_layers:
+        ignored = [s.strip() for s in args.ignored_layers.split(",") if s.strip()]
+        if ignored:
+            config["ignored_layers"] = ignored
+
+    return config
+
+
 def main() -> None:
     args = parse_args()
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
@@ -199,13 +268,23 @@ def main() -> None:
     gen_cfg = load_t2i_generation_config(args.model)
     expected_grid_tokens = ar_height * (ar_width + 1)
 
+    # Build quantization config for DiT stage
+    quant_config = _build_quantization_config(args)
+
     logger.info("Initializing Omni pipeline...")
-    omni = Omni(
-        model=args.model,
-        stage_configs_path=args.stage_config,
-        trust_remote_code=args.trust_remote_code,
-        tensor_parallel_size=args.tensor_parallel_size,
-    )
+    omni_kwargs = {
+        "model": args.model,
+        "stage_configs_path": args.stage_config,
+        "trust_remote_code": args.trust_remote_code,
+        "tensor_parallel_size": args.tensor_parallel_size,
+    }
+    if quant_config is not None:
+        omni_kwargs["diffusion_quantization_config"] = quant_config
+        logger.info("Using quantization: %s (activation_scheme=%s)", args.quantization, args.activation_scheme)
+        if args.ignored_layers:
+            logger.info("Ignored layers for quantization: %s", args.ignored_layers)
+
+    omni = Omni(**omni_kwargs)
     try:
         ar_sampling = SamplingParams(
             temperature=1.0,
