@@ -482,13 +482,17 @@ class Ideogram4Transformer2DModel(nn.Module):
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         stacked_params_mapping = [
-            # Map fused w1w3 back to separate w1 and w3 for weight loading
-            (".w1w3.", ".w1.", "w1"),
-            (".w1w3.", ".w3.", "w3"),
             # Map fused to_qkv back to separate to_q, to_k, to_v
             (".to_qkv.", ".to_q.", "q"),
             (".to_qkv.", ".to_k.", "k"),
             (".to_qkv.", ".to_v.", "v"),
+        ]
+        # MergedColumnParallelLinear uses integer shard_ids
+        merged_params_mapping = [
+            # (param_name, weight_name, shard_id)
+            # shard_id 0 for w1, shard_id 1 for w3
+            (".w1w3.", ".w1.", 0),
+            (".w1w3.", ".w3.", 1),
         ]
         self.stacked_params_mapping = stacked_params_mapping
 
@@ -502,6 +506,24 @@ class Ideogram4Transformer2DModel(nn.Module):
         for name, loaded_weight in weights:
             original_name = name
             mapped = False
+
+            # Handle MergedColumnParallelLinear (w1w3) with integer shard_ids
+            for param_name, weight_name, shard_id in merged_params_mapping:
+                if weight_name not in original_name:
+                    continue
+                name = original_name.replace(weight_name, param_name)
+                param = params_dict.get(name)
+                if param is None:
+                    break
+                weight_loader = param.weight_loader
+                weight_loader(param, loaded_weight, shard_id)
+                loaded_params.add(name)
+                mapped = True
+                break
+            if mapped:
+                continue
+
+            # Handle QKVParallelLinear (to_qkv) with string shard_ids
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in original_name:
                     continue
