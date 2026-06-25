@@ -449,9 +449,10 @@ class Ideogram4Transformer2DModel(nn.Module):
         params_dict = dict(self.named_parameters())
 
         loaded_params: set[str] = set()
-        for name, loaded_weight in weights:
-            # AutoWeightsLoader may pass names with prefix like "transformer.layers.0..."
+        for original_name, loaded_weight in weights:
+            # AutoWeightsLoader passes names with prefix like "transformer.layers.0..."
             # We need to strip the prefix to match params_dict
+            name = original_name
             if name.startswith("transformer."):
                 name = name[len("transformer.") :]
             elif name.startswith("unconditional_transformer."):
@@ -462,5 +463,6 @@ class Ideogram4Transformer2DModel(nn.Module):
             param = params_dict[name]
             weight_loader = getattr(param, "weight_loader", default_weight_loader)
             weight_loader(param, loaded_weight)
-            loaded_params.add(name)
+            # Return the original name with prefix for proper tracking
+            loaded_params.add(original_name)
         return loaded_params
