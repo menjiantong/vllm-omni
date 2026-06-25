@@ -13,6 +13,7 @@ import torch.nn.functional as F
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.normalization import RMSNorm as DiffusersRMSNorm
 from vllm.model_executor.layers.layernorm import RMSNorm
+from vllm.model_executor.layers.linear import ReplicatedLinear
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
@@ -94,14 +95,22 @@ class Ideogram4MLP(nn.Module):
         prefix: str = "",
     ) -> None:
         super().__init__()
-        del quant_config  # Not used with nn.Linear
-        self.w1 = nn.Linear(dim, hidden_dim, bias=False)
-        self.w3 = nn.Linear(dim, hidden_dim, bias=False)
-        self.w2 = nn.Linear(hidden_dim, dim, bias=False)
+        self.w1 = ReplicatedLinear(
+            dim, hidden_dim, bias=False, quant_config=quant_config, prefix=_join_prefix(prefix, "w1")
+        )
+        self.w3 = ReplicatedLinear(
+            dim, hidden_dim, bias=False, quant_config=quant_config, prefix=_join_prefix(prefix, "w3")
+        )
+        self.w2 = ReplicatedLinear(
+            hidden_dim, dim, bias=False, quant_config=quant_config, prefix=_join_prefix(prefix, "w2")
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.silu(self.w1(x)) * self.w3(x)
-        return self.w2(x)
+        x1, _ = self.w1(x)
+        x3, _ = self.w3(x)
+        x = F.silu(x1) * x3
+        x, _ = self.w2(x)
+        return x
 
 
 class Ideogram4Attention(nn.Module):
@@ -116,23 +125,34 @@ class Ideogram4Attention(nn.Module):
         prefix: str = "",
     ) -> None:
         super().__init__()
-        del quant_config  # Not used with nn.Linear
         if hidden_size % num_heads != 0:
             raise ValueError(f"hidden_size={hidden_size} must be divisible by num_heads={num_heads}")
         self.hidden_size = hidden_size
         self.num_heads = num_heads
         self.head_dim = hidden_size // num_heads
 
-        self.to_q = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.to_k = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.to_v = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.to_q = ReplicatedLinear(
+            hidden_size, hidden_size, bias=False, quant_config=quant_config, prefix=_join_prefix(prefix, "to_q")
+        )
+        self.to_k = ReplicatedLinear(
+            hidden_size, hidden_size, bias=False, quant_config=quant_config, prefix=_join_prefix(prefix, "to_k")
+        )
+        self.to_v = ReplicatedLinear(
+            hidden_size, hidden_size, bias=False, quant_config=quant_config, prefix=_join_prefix(prefix, "to_v")
+        )
 
         self.norm_q = RMSNorm(self.head_dim, eps=eps)
         self.norm_k = RMSNorm(self.head_dim, eps=eps)
 
         self.to_out = nn.ModuleList(
             [
-                nn.Linear(hidden_size, hidden_size, bias=False),
+                ReplicatedLinear(
+                    hidden_size,
+                    hidden_size,
+                    bias=False,
+                    quant_config=quant_config,
+                    prefix=_join_prefix(prefix, "to_out.0"),
+                ),
                 nn.Dropout(0.0),
             ]
         )
@@ -153,9 +173,9 @@ class Ideogram4Attention(nn.Module):
     ) -> torch.Tensor:
         B, S, _ = hidden_states.shape
 
-        query = self.to_q(hidden_states)
-        key = self.to_k(hidden_states)
-        value = self.to_v(hidden_states)
+        query, _ = self.to_q(hidden_states)
+        key, _ = self.to_k(hidden_states)
+        value, _ = self.to_v(hidden_states)
 
         # Reshape to (B, L, heads, head_dim) for norm and rope
         query = query.unflatten(-1, (self.num_heads, -1))
@@ -183,7 +203,7 @@ class Ideogram4Attention(nn.Module):
         hidden_states = self.attn(query, key, value, attn_metadata)
         hidden_states = hidden_states.flatten(2, 3)
 
-        hidden_states = self.to_out[0](hidden_states.contiguous())
+        hidden_states, _ = self.to_out[0](hidden_states.contiguous())
         hidden_states = self.to_out[1](hidden_states)
         return hidden_states
 
@@ -282,15 +302,25 @@ class Ideogram4EmbedScalar(nn.Module):
 
 
 class Ideogram4FinalLayer(nn.Module):
-    def __init__(self, hidden_size: int, out_channels: int, adaln_dim: int) -> None:
+    def __init__(
+        self,
+        hidden_size: int,
+        out_channels: int,
+        adaln_dim: int,
+        quant_config: "QuantizationConfig | None" = None,
+        prefix: str = "",
+    ) -> None:
         super().__init__()
         self.norm_final = nn.LayerNorm(hidden_size, eps=1e-6, elementwise_affine=False)
-        self.linear = nn.Linear(hidden_size, out_channels, bias=True)
+        self.linear = ReplicatedLinear(
+            hidden_size, out_channels, bias=True, quant_config=quant_config, prefix=_join_prefix(prefix, "linear")
+        )
         self.adaln_modulation = nn.Linear(adaln_dim, hidden_size, bias=True)
 
     def forward(self, hidden_states: torch.Tensor, conditioning: torch.Tensor) -> torch.Tensor:
         scale = 1.0 + self.adaln_modulation(F.silu(conditioning))
-        return self.linear(self.norm_final(hidden_states) * scale)
+        output, _ = self.linear(self.norm_final(hidden_states) * scale)
+        return output
 
 
 class Ideogram4Transformer2DModel(nn.Module):
@@ -349,9 +379,13 @@ class Ideogram4Transformer2DModel(nn.Module):
         else:
             self.parallel_config = DiffusionParallelConfig()
 
-        self.input_proj = nn.Linear(in_channels, hidden_size, bias=True)
+        self.input_proj = ReplicatedLinear(
+            in_channels, hidden_size, bias=True, quant_config=quant_config, prefix="input_proj"
+        )
         self.llm_cond_norm = DiffusersRMSNorm(llm_features_dim, eps=1e-6, elementwise_affine=True)
-        self.llm_cond_proj = nn.Linear(llm_features_dim, hidden_size, bias=True)
+        self.llm_cond_proj = ReplicatedLinear(
+            llm_features_dim, hidden_size, bias=True, quant_config=quant_config, prefix="llm_cond_proj"
+        )
         self.t_embedding = Ideogram4EmbedScalar(hidden_size, input_range=(0.0, 1.0))
         self.adaln_proj = nn.Linear(hidden_size, adaln_dim, bias=True)
 
@@ -382,6 +416,8 @@ class Ideogram4Transformer2DModel(nn.Module):
             hidden_size=hidden_size,
             out_channels=in_channels,
             adaln_dim=adaln_dim,
+            quant_config=quant_config,
+            prefix="final_layer",
         )
 
     @property
@@ -408,7 +444,8 @@ class Ideogram4Transformer2DModel(nn.Module):
 
         encoder_hidden_states = encoder_hidden_states * llm_token_mask
         hidden_states = hidden_states * output_image_mask
-        hidden_states = self.input_proj(hidden_states) * output_image_mask
+        hidden_states_proj, _ = self.input_proj(hidden_states)
+        hidden_states = hidden_states_proj * output_image_mask
 
         t_cond = self.t_embedding(timestep)
         if timestep.dim() == 1:
@@ -416,7 +453,8 @@ class Ideogram4Transformer2DModel(nn.Module):
         adaln_input = F.silu(self.adaln_proj(t_cond))
 
         encoder_hidden_states = self.llm_cond_norm(encoder_hidden_states)
-        encoder_hidden_states = self.llm_cond_proj(encoder_hidden_states) * llm_token_mask
+        encoder_hidden_states_proj, _ = self.llm_cond_proj(encoder_hidden_states)
+        encoder_hidden_states = encoder_hidden_states_proj * llm_token_mask
 
         hidden_states = hidden_states + encoder_hidden_states
 
@@ -447,6 +485,7 @@ class Ideogram4Transformer2DModel(nn.Module):
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         params_dict = dict(self.named_parameters())
+        buffers_dict = dict(self.named_buffers())
 
         loaded_params: set[str] = set()
         for original_name, loaded_weight in weights:
@@ -458,11 +497,16 @@ class Ideogram4Transformer2DModel(nn.Module):
             elif name.startswith("unconditional_transformer."):
                 name = name[len("unconditional_transformer.") :]
 
-            if name not in params_dict:
-                continue
-            param = params_dict[name]
-            weight_loader = getattr(param, "weight_loader", default_weight_loader)
-            weight_loader(param, loaded_weight)
-            # Return the original name with prefix for proper tracking
-            loaded_params.add(original_name)
+            # Check if it's a parameter or buffer
+            if name in params_dict:
+                param = params_dict[name]
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                weight_loader(param, loaded_weight)
+                loaded_params.add(original_name)
+            elif name in buffers_dict:
+                # For weight_scale and other buffers
+                buffer = buffers_dict[name]
+                buffer.copy_(loaded_weight)
+                loaded_params.add(original_name)
+
         return loaded_params
