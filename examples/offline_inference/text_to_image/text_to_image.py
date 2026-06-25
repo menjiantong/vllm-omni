@@ -394,7 +394,7 @@ def main():
     elif args.quantization == "modelopt":
         # ModelOpt FP8 with per-channel weight scale for pre-quantized checkpoints
         # (e.g., Ideogram4 FP8 which uses FP8_PER_CHANNEL_PER_TOKEN)
-        quant_kwargs["quantization_config"] = {
+        quant_kwargs["diffusion_quantization_config"] = {
             "method": "modelopt",
             "quant_algo": "FP8_PER_CHANNEL_PER_TOKEN",
             "is_checkpoint_fp8_serialized": True,
