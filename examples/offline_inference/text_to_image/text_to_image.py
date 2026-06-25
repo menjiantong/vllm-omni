@@ -396,7 +396,7 @@ def main():
         # (e.g., Ideogram4 FP8 which uses FP8_PER_CHANNEL_PER_TOKEN)
         quant_kwargs["quantization_config"] = {
             "method": "modelopt",
-            "quant_method": "FP8_PER_CHANNEL_PER_TOKEN",
+            "quant_algo": "FP8_PER_CHANNEL_PER_TOKEN",
             "is_checkpoint_fp8_serialized": True,
         }
     elif args.quantization and ignored_layers:
