@@ -189,9 +189,13 @@ class Ideogram4Pipeline(
         # Prefetch all subfolders to avoid race conditions with gated repos
         prefetch_subfolders(model, IDEOGRAM4_SUBFOLDERS, local_files_only=local_files_only)
 
-        # Scheduler
-        self.scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
-            model, subfolder="scheduler", local_files_only=local_files_only
+        # Scheduler - use from_pretrained_with_prefetch for gated repo support
+        self.scheduler = from_pretrained_with_prefetch(
+            FlowMatchEulerDiscreteScheduler.from_pretrained,
+            model,
+            subfolder="scheduler",
+            prefetch_list=IDEOGRAM4_SUBFOLDERS,
+            local_files_only=local_files_only,
         )
 
         # VAE
@@ -214,8 +218,14 @@ class Ideogram4Pipeline(
             local_files_only=local_files_only,
         ).to(self._execution_device)
 
-        # Tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(model, subfolder="tokenizer", local_files_only=local_files_only)
+        # Tokenizer - use from_pretrained_with_prefetch for gated repo support
+        self.tokenizer = from_pretrained_with_prefetch(
+            AutoTokenizer.from_pretrained,
+            model,
+            subfolder="tokenizer",
+            prefetch_list=IDEOGRAM4_SUBFOLDERS,
+            local_files_only=local_files_only,
+        )
 
         # Transformer (conditional)
         transformer_kwargs = get_transformer_config_kwargs(od_config.tf_model_config, Ideogram4Transformer2DModel)
