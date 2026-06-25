@@ -13,11 +13,6 @@ import torch.nn.functional as F
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.normalization import RMSNorm as DiffusersRMSNorm
 from vllm.model_executor.layers.layernorm import RMSNorm
-from vllm.model_executor.layers.linear import (
-    MergedColumnParallelLinear,
-    QKVParallelLinear,
-    RowParallelLinear,
-)
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
@@ -99,31 +94,14 @@ class Ideogram4MLP(nn.Module):
         prefix: str = "",
     ) -> None:
         super().__init__()
-        # For TP: w1 and w3 are ColumnParallel (fused), w2 is RowParallel
-        self.w1w3 = MergedColumnParallelLinear(
-            dim,
-            [hidden_dim, hidden_dim],
-            bias=False,
-            return_bias=False,
-            quant_config=quant_config,
-            prefix=_join_prefix(prefix, "w1w3"),
-        )
-        self.w2 = RowParallelLinear(
-            hidden_dim,
-            dim,
-            bias=False,
-            input_is_parallel=True,
-            return_bias=False,
-            quant_config=quant_config,
-            prefix=_join_prefix(prefix, "w2"),
-        )
+        del quant_config  # Not used with nn.Linear
+        self.w1 = nn.Linear(dim, hidden_dim, bias=False)
+        self.w3 = nn.Linear(dim, hidden_dim, bias=False)
+        self.w2 = nn.Linear(hidden_dim, dim, bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x, _ = self.w1w3(x)
-        x1, x3 = x.chunk(2, dim=-1)
-        x = F.silu(x1) * x3
-        x, _ = self.w2(x)
-        return x
+        x = F.silu(self.w1(x)) * self.w3(x)
+        return self.w2(x)
 
 
 class Ideogram4Attention(nn.Module):
@@ -138,49 +116,33 @@ class Ideogram4Attention(nn.Module):
         prefix: str = "",
     ) -> None:
         super().__init__()
+        del quant_config  # Not used with nn.Linear
         if hidden_size % num_heads != 0:
             raise ValueError(f"hidden_size={hidden_size} must be divisible by num_heads={num_heads}")
         self.hidden_size = hidden_size
         self.num_heads = num_heads
         self.head_dim = hidden_size // num_heads
 
-        # TP: QKV fused projection
-        self.to_qkv = QKVParallelLinear(
-            hidden_size=hidden_size,
-            head_size=self.head_dim,
-            total_num_heads=num_heads,
-            total_num_kv_heads=num_heads,
-            bias=False,
-            quant_config=quant_config,
-            prefix=_join_prefix(prefix, "to_qkv"),
-        )
-        self.query_num_heads = self.to_qkv.num_heads
-        self.kv_num_heads = self.to_qkv.num_kv_heads
+        self.to_q = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.to_k = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.to_v = nn.Linear(hidden_size, hidden_size, bias=False)
 
         self.norm_q = RMSNorm(self.head_dim, eps=eps)
         self.norm_k = RMSNorm(self.head_dim, eps=eps)
 
         self.to_out = nn.ModuleList(
             [
-                RowParallelLinear(
-                    hidden_size,
-                    hidden_size,
-                    bias=False,
-                    input_is_parallel=True,
-                    return_bias=False,
-                    quant_config=quant_config,
-                    prefix=_join_prefix(prefix, "to_out.0"),
-                ),
+                nn.Linear(hidden_size, hidden_size, bias=False),
                 nn.Dropout(0.0),
             ]
         )
 
         self.attn = Attention(
-            num_heads=self.query_num_heads,
+            num_heads=self.num_heads,
             head_size=self.head_dim,
             softmax_scale=1.0 / (self.head_dim**0.5),
             causal=False,
-            num_kv_heads=self.kv_num_heads,
+            num_kv_heads=self.num_heads,
         )
 
     def forward(
@@ -189,13 +151,16 @@ class Ideogram4Attention(nn.Module):
         attention_mask: torch.Tensor | None = None,
         image_rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> torch.Tensor:
-        qkv, _ = self.to_qkv(hidden_states)
-        query, key, value = qkv.chunk(3, dim=-1)
+        B, S, _ = hidden_states.shape
+
+        query = self.to_q(hidden_states)
+        key = self.to_k(hidden_states)
+        value = self.to_v(hidden_states)
 
         # Reshape to (B, L, heads, head_dim) for norm and rope
-        query = query.unflatten(-1, (self.query_num_heads, -1))
-        key = key.unflatten(-1, (self.kv_num_heads, -1))
-        value = value.unflatten(-1, (self.kv_num_heads, -1))
+        query = query.unflatten(-1, (self.num_heads, -1))
+        key = key.unflatten(-1, (self.num_heads, -1))
+        value = value.unflatten(-1, (self.num_heads, -1))
 
         query = self.norm_q(query)
         key = self.norm_k(key)
@@ -218,7 +183,7 @@ class Ideogram4Attention(nn.Module):
         hidden_states = self.attn(query, key, value, attn_metadata)
         hidden_states = hidden_states.flatten(2, 3)
 
-        hidden_states, _ = self.to_out[0](hidden_states.contiguous())
+        hidden_states = self.to_out[0](hidden_states.contiguous())
         hidden_states = self.to_out[1](hidden_states)
         return hidden_states
 
@@ -481,65 +446,10 @@ class Ideogram4Transformer2DModel(nn.Module):
         return Transformer2DModelOutput(sample=output)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        stacked_params_mapping = [
-            # Map fused to_qkv back to separate to_q, to_k, to_v
-            (".to_qkv.", ".to_q.", "q"),
-            (".to_qkv.", ".to_k.", "k"),
-            (".to_qkv.", ".to_v.", "v"),
-        ]
-        # MergedColumnParallelLinear uses integer shard_ids
-        merged_params_mapping = [
-            # (param_name, weight_name, shard_id)
-            # shard_id 0 for w1, shard_id 1 for w3
-            (".w1w3.", ".w1.", 0),
-            (".w1w3.", ".w3.", 1),
-        ]
-        self.stacked_params_mapping = stacked_params_mapping
-
         params_dict = dict(self.named_parameters())
-
-        for name, buffer in self.named_buffers():
-            if name.endswith(".beta") or name.endswith(".eps"):
-                params_dict[name] = buffer
 
         loaded_params: set[str] = set()
         for name, loaded_weight in weights:
-            original_name = name
-            mapped = False
-
-            # Handle MergedColumnParallelLinear (w1w3) with integer shard_ids
-            for param_name, weight_name, shard_id in merged_params_mapping:
-                if weight_name not in original_name:
-                    continue
-                name = original_name.replace(weight_name, param_name)
-                param = params_dict.get(name)
-                if param is None:
-                    break
-                weight_loader = param.weight_loader
-                weight_loader(param, loaded_weight, shard_id)
-                loaded_params.add(name)
-                mapped = True
-                break
-            if mapped:
-                continue
-
-            # Handle QKVParallelLinear (to_qkv) with string shard_ids
-            for param_name, weight_name, shard_id in stacked_params_mapping:
-                if weight_name not in original_name:
-                    continue
-                name = original_name.replace(weight_name, param_name)
-                param = params_dict.get(name)
-                if param is None:
-                    break
-                weight_loader = param.weight_loader
-                weight_loader(param, loaded_weight, shard_id)
-                loaded_params.add(name)
-                mapped = True
-                break
-            if mapped:
-                continue
-
-            name = original_name
             if name not in params_dict:
                 continue
             param = params_dict[name]
