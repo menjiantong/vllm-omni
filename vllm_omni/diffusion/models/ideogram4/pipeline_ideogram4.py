@@ -20,6 +20,10 @@ from vllm.model_executor.models.utils import AutoWeightsLoader
 from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.utils import get_local_device
 from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineLoader
+from vllm_omni.diffusion.model_loader.hub_prefetch import (
+    from_pretrained_with_prefetch,
+    prefetch_subfolders,
+)
 from vllm_omni.diffusion.models.ideogram4.transformer_ideogram4 import (
     IMAGE_POSITION_OFFSET,
     LLM_TOKEN_INDICATOR,
@@ -40,6 +44,16 @@ logger = logging.getLogger(__name__)
 # Hidden states of these Qwen3-VL decoder layers are concatenated to form the per-token
 # text conditioning consumed by the Ideogram4 transformer.
 QWEN3_VL_ACTIVATION_LAYERS = (0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 35)
+
+# Subfolders to prefetch for Ideogram4
+IDEOGRAM4_SUBFOLDERS = [
+    "text_encoder",
+    "tokenizer",
+    "vae",
+    "scheduler",
+    "transformer",
+    "unconditional_transformer",
+]
 
 
 def _logit_normal_sigmas(
@@ -172,21 +186,32 @@ class Ideogram4Pipeline(
         model = od_config.model
         local_files_only = os.path.exists(model)
 
+        # Prefetch all subfolders to avoid race conditions with gated repos
+        prefetch_subfolders(model, IDEOGRAM4_SUBFOLDERS, local_files_only=local_files_only)
+
         # Scheduler
         self.scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
             model, subfolder="scheduler", local_files_only=local_files_only
         )
 
         # VAE
-        self.vae = AutoencoderKLFlux2.from_pretrained(model, subfolder="vae", local_files_only=local_files_only).to(
-            self._execution_device
-        )
+        self.vae = from_pretrained_with_prefetch(
+            AutoencoderKLFlux2.from_pretrained,
+            model,
+            subfolder="vae",
+            prefetch_list=IDEOGRAM4_SUBFOLDERS,
+            local_files_only=local_files_only,
+        ).to(self._execution_device)
 
         # Text encoder (Qwen3-VL)
         from transformers import Qwen3VLForConditionalGeneration
 
-        self.text_encoder = Qwen3VLForConditionalGeneration.from_pretrained(
-            model, subfolder="text_encoder", local_files_only=local_files_only
+        self.text_encoder = from_pretrained_with_prefetch(
+            Qwen3VLForConditionalGeneration.from_pretrained,
+            model,
+            subfolder="text_encoder",
+            prefetch_list=IDEOGRAM4_SUBFOLDERS,
+            local_files_only=local_files_only,
         ).to(self._execution_device)
 
         # Tokenizer
