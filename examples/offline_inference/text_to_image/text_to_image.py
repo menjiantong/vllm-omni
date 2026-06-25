@@ -188,9 +188,10 @@ def parse_args() -> argparse.Namespace:
         "--quantization",
         type=str,
         default=None,
-        choices=["fp8", "int8", "gguf"],
+        choices=["fp8", "int8", "gguf", "modelopt"],
         help="Quantization method for the transformer. "
-        "Options: 'fp8' (FP8 W8A8 on Ada/Hopper, weight-only on older GPUs), 'int8' (Int8 W8A8), 'gguf' (GGUF quantized weights). "
+        "Options: 'fp8' (FP8 W8A8 on Ada/Hopper, weight-only on older GPUs), 'int8' (Int8 W8A8), 'gguf' (GGUF quantized weights), "
+        "'modelopt' (ModelOpt FP8 with per-channel weight scale for pre-quantized checkpoints like Ideogram4). "
         "Default: None (no quantization, uses BF16).",
     )
     parser.add_argument(
@@ -389,6 +390,14 @@ def main():
         quant_kwargs["quantization_config"] = {
             "method": "gguf",
             "gguf_model": args.gguf_model,
+        }
+    elif args.quantization == "modelopt":
+        # ModelOpt FP8 with per-channel weight scale for pre-quantized checkpoints
+        # (e.g., Ideogram4 FP8 which uses FP8_PER_CHANNEL_PER_TOKEN)
+        quant_kwargs["quantization_config"] = {
+            "method": "modelopt",
+            "quant_method": "FP8_PER_CHANNEL_PER_TOKEN",
+            "is_checkpoint_fp8_serialized": True,
         }
     elif args.quantization and ignored_layers:
         quant_kwargs["quantization_config"] = {
