@@ -450,6 +450,13 @@ class Ideogram4Transformer2DModel(nn.Module):
 
         loaded_params: set[str] = set()
         for name, loaded_weight in weights:
+            # AutoWeightsLoader may pass names with prefix like "transformer.layers.0..."
+            # We need to strip the prefix to match params_dict
+            if name.startswith("transformer."):
+                name = name[len("transformer.") :]
+            elif name.startswith("unconditional_transformer."):
+                name = name[len("unconditional_transformer.") :]
+
             if name not in params_dict:
                 continue
             param = params_dict[name]
