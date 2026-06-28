@@ -71,8 +71,11 @@ class Ideogram4Fp8Linear(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Dequantize: weight_fp8 * scale
         # weight: (out, in), weight_scale: (out,)
-        w = self.weight.to(x.dtype) * self.weight_scale.to(x.dtype).unsqueeze(1)
-        bias = self.bias.to(x.dtype) if self.bias is not None else None
+        # Move weights to the same device as input
+        w = self.weight.to(device=x.device, dtype=x.dtype)
+        scale = self.weight_scale.to(device=x.device, dtype=x.dtype).unsqueeze(1)
+        w = w * scale
+        bias = self.bias.to(device=x.device, dtype=x.dtype) if self.bias is not None else None
         return F.linear(x, w, bias)
 
     def extra_repr(self) -> str:
