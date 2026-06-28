@@ -13,7 +13,6 @@ import torch.nn.functional as F
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.normalization import RMSNorm as DiffusersRMSNorm
 from vllm.model_executor.layers.layernorm import RMSNorm
-from vllm.model_executor.layers.linear import ReplicatedLinear
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
@@ -95,26 +94,24 @@ class Ideogram4MLP(nn.Module):
         prefix: str = "",
     ) -> None:
         super().__init__()
-        self.w1 = ReplicatedLinear(
-            dim, hidden_dim, bias=False, quant_config=quant_config, prefix=_join_prefix(prefix, "w1")
-        )
-        self.w3 = ReplicatedLinear(
-            dim, hidden_dim, bias=False, quant_config=quant_config, prefix=_join_prefix(prefix, "w3")
-        )
-        self.w2 = ReplicatedLinear(
-            hidden_dim, dim, bias=False, quant_config=quant_config, prefix=_join_prefix(prefix, "w2")
-        )
+        self.w1 = nn.Linear(dim, hidden_dim, bias=False)
+        self.w3 = nn.Linear(dim, hidden_dim, bias=False)
+        self.w2 = nn.Linear(hidden_dim, dim, bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x1, _ = self.w1(x)
-        x3, _ = self.w3(x)
+        x1 = self.w1(x)
+        x3 = self.w3(x)
         x = F.silu(x1) * x3
-        x, _ = self.w2(x)
+        x = self.w2(x)
         return x
 
 
 class Ideogram4Attention(nn.Module):
-    """Self-attention with split Q/K/V, q/k RMSNorm, and MRoPE."""
+    """Self-attention with merged QKV projection, q/k RMSNorm, and MRoPE.
+
+    Note: This uses merged QKV projection (matching the checkpoint format)
+    instead of separate to_q/to_k/to_v projections.
+    """
 
     def __init__(
         self,
@@ -131,31 +128,15 @@ class Ideogram4Attention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = hidden_size // num_heads
 
-        self.to_q = ReplicatedLinear(
-            hidden_size, hidden_size, bias=False, quant_config=quant_config, prefix=_join_prefix(prefix, "to_q")
-        )
-        self.to_k = ReplicatedLinear(
-            hidden_size, hidden_size, bias=False, quant_config=quant_config, prefix=_join_prefix(prefix, "to_k")
-        )
-        self.to_v = ReplicatedLinear(
-            hidden_size, hidden_size, bias=False, quant_config=quant_config, prefix=_join_prefix(prefix, "to_v")
-        )
+        # Merged QKV projection (matches checkpoint: attention.qkv.weight)
+        self.qkv = nn.Linear(hidden_size, 3 * hidden_size, bias=False)
 
+        # Q/K normalization (per-head RMSNorm)
         self.norm_q = RMSNorm(self.head_dim, eps=eps)
         self.norm_k = RMSNorm(self.head_dim, eps=eps)
 
-        self.to_out = nn.ModuleList(
-            [
-                ReplicatedLinear(
-                    hidden_size,
-                    hidden_size,
-                    bias=False,
-                    quant_config=quant_config,
-                    prefix=_join_prefix(prefix, "to_out.0"),
-                ),
-                nn.Dropout(0.0),
-            ]
-        )
+        # Output projection (matches checkpoint: attention.o.weight)
+        self.o = nn.Linear(hidden_size, hidden_size, bias=False)
 
         self.attn = Attention(
             num_heads=self.num_heads,
@@ -173,25 +154,27 @@ class Ideogram4Attention(nn.Module):
     ) -> torch.Tensor:
         B, S, _ = hidden_states.shape
 
-        query, _ = self.to_q(hidden_states)
-        key, _ = self.to_k(hidden_states)
-        value, _ = self.to_v(hidden_states)
+        # Merged QKV projection
+        qkv = self.qkv(hidden_states)
+        qkv = qkv.view(B, S, 3, self.num_heads, self.head_dim)
+        q, k, v = qkv.unbind(dim=2)  # Each: (B, S, num_heads, head_dim)
 
-        # Reshape to (B, L, heads, head_dim) for norm and rope
-        query = query.unflatten(-1, (self.num_heads, -1))
-        key = key.unflatten(-1, (self.num_heads, -1))
-        value = value.unflatten(-1, (self.num_heads, -1))
-
-        query = self.norm_q(query)
-        key = self.norm_k(key)
+        # Q/K normalization
+        q = self.norm_q(q)
+        k = self.norm_k(k)
 
         # Apply MRoPE
         if image_rotary_emb is not None:
             cos, sin = image_rotary_emb
             cos = cos.unsqueeze(2)  # (B, L, 1, head_dim)
             sin = sin.unsqueeze(2)
-            query = (query * cos) + (_rotate_half(query) * sin)
-            key = (key * cos) + (_rotate_half(key) * sin)
+            q = (q * cos) + (_rotate_half(q) * sin)
+            k = (k * cos) + (_rotate_half(k) * sin)
+
+        # Reshape for attention: (B, num_heads, L, head_dim)
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
 
         # Attention
         attn_metadata = None
@@ -200,11 +183,11 @@ class Ideogram4Attention(nn.Module):
                 attention_mask = attention_mask.unsqueeze(1)
             attn_metadata = AttentionMetadata(attn_mask=attention_mask)
 
-        hidden_states = self.attn(query, key, value, attn_metadata)
-        hidden_states = hidden_states.flatten(2, 3)
+        hidden_states = self.attn(q, k, v, attn_metadata)
+        hidden_states = hidden_states.transpose(1, 2).reshape(B, S, self.hidden_size)
 
-        hidden_states, _ = self.to_out[0](hidden_states.contiguous())
-        hidden_states = self.to_out[1](hidden_states)
+        # Output projection
+        hidden_states = self.o(hidden_states.contiguous())
         return hidden_states
 
 
@@ -312,14 +295,12 @@ class Ideogram4FinalLayer(nn.Module):
     ) -> None:
         super().__init__()
         self.norm_final = nn.LayerNorm(hidden_size, eps=1e-6, elementwise_affine=False)
-        self.linear = ReplicatedLinear(
-            hidden_size, out_channels, bias=True, quant_config=quant_config, prefix=_join_prefix(prefix, "linear")
-        )
+        self.linear = nn.Linear(hidden_size, out_channels, bias=True)
         self.adaln_modulation = nn.Linear(adaln_dim, hidden_size, bias=True)
 
     def forward(self, hidden_states: torch.Tensor, conditioning: torch.Tensor) -> torch.Tensor:
         scale = 1.0 + self.adaln_modulation(F.silu(conditioning))
-        output, _ = self.linear(self.norm_final(hidden_states) * scale)
+        output = self.linear(self.norm_final(hidden_states) * scale)
         return output
 
 
@@ -379,13 +360,9 @@ class Ideogram4Transformer2DModel(nn.Module):
         else:
             self.parallel_config = DiffusionParallelConfig()
 
-        self.input_proj = ReplicatedLinear(
-            in_channels, hidden_size, bias=True, quant_config=quant_config, prefix="input_proj"
-        )
+        self.input_proj = nn.Linear(in_channels, hidden_size, bias=True)
         self.llm_cond_norm = DiffusersRMSNorm(llm_features_dim, eps=1e-6, elementwise_affine=True)
-        self.llm_cond_proj = ReplicatedLinear(
-            llm_features_dim, hidden_size, bias=True, quant_config=quant_config, prefix="llm_cond_proj"
-        )
+        self.llm_cond_proj = nn.Linear(llm_features_dim, hidden_size, bias=True)
         self.t_embedding = Ideogram4EmbedScalar(hidden_size, input_range=(0.0, 1.0))
         self.adaln_proj = nn.Linear(hidden_size, adaln_dim, bias=True)
 
@@ -444,7 +421,7 @@ class Ideogram4Transformer2DModel(nn.Module):
 
         encoder_hidden_states = encoder_hidden_states * llm_token_mask
         hidden_states = hidden_states * output_image_mask
-        hidden_states_proj, _ = self.input_proj(hidden_states)
+        hidden_states_proj = self.input_proj(hidden_states)
         hidden_states = hidden_states_proj * output_image_mask
 
         t_cond = self.t_embedding(timestep)
@@ -453,7 +430,7 @@ class Ideogram4Transformer2DModel(nn.Module):
         adaln_input = F.silu(self.adaln_proj(t_cond))
 
         encoder_hidden_states = self.llm_cond_norm(encoder_hidden_states)
-        encoder_hidden_states_proj, _ = self.llm_cond_proj(encoder_hidden_states)
+        encoder_hidden_states_proj = self.llm_cond_proj(encoder_hidden_states)
         encoder_hidden_states = encoder_hidden_states_proj * llm_token_mask
 
         hidden_states = hidden_states + encoder_hidden_states
@@ -484,11 +461,29 @@ class Ideogram4Transformer2DModel(nn.Module):
         return Transformer2DModelOutput(sample=output)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+        # Convert to list to allow multiple passes (FP8 detection + actual loading)
+        weights_list = list(weights)
+
+        # Check if checkpoint uses Ideogram's weight-only FP8 format
+        from vllm_omni.diffusion.models.ideogram4.ideogram_fp8 import (
+            is_ideogram_fp8_state_dict,
+            swap_linears_to_fp8,
+        )
+
+        # Build state dict for FP8 detection
+        state_dict = {name: tensor for name, tensor in weights_list}
+
+        if is_ideogram_fp8_state_dict(state_dict):
+            # Swap nn.Linear to Ideogram4Fp8Linear before loading
+            # This must happen before we try to load weight_scale buffers
+            swap_linears_to_fp8(self, state_dict, compute_dtype=self.dtype)
+
+        # Now load the weights
         params_dict = dict(self.named_parameters())
         buffers_dict = dict(self.named_buffers())
 
         loaded_params: set[str] = set()
-        for original_name, loaded_weight in weights:
+        for original_name, loaded_weight in weights_list:
             # AutoWeightsLoader passes names with prefix like "transformer.layers.0..."
             # We need to strip the prefix to match params_dict
             name = original_name

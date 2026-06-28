@@ -204,15 +204,36 @@ class Ideogram4Pipeline(
         ).to(self._execution_device)
 
         # Text encoder (Qwen3-VL)
-        from transformers import Qwen3VLForConditionalGeneration
+        # Check if text_encoder uses Ideogram's weight-only FP8 format
+        from huggingface_hub import hf_hub_download
 
-        self.text_encoder = from_pretrained_with_prefetch(
-            Qwen3VLForConditionalGeneration.from_pretrained,
-            model,
-            subfolder="text_encoder",
-            prefetch_list=IDEOGRAM4_SUBFOLDERS,
-            local_files_only=local_files_only,
-        ).to(self._execution_device)
+        try:
+            text_encoder_config_path = hf_hub_download(
+                model, "text_encoder/config.json", local_files_only=local_files_only
+            )
+            with open(text_encoder_config_path) as f:
+                text_encoder_config_dict = json.load(f)
+            is_ideogram_fp8 = text_encoder_config_dict.get("ideogram_fp8_weight_only", False)
+        except Exception:
+            is_ideogram_fp8 = False
+
+        if is_ideogram_fp8:
+            # Use custom FP8 loading for Ideogram-4's weight-only FP8 format
+            self.text_encoder = self._load_text_encoder_ideogram_fp8(
+                model, self._execution_device, od_config.dtype, local_files_only
+            )
+            logger.info("Loaded text_encoder with Ideogram-4 weight-only FP8 format")
+        else:
+            # Standard loading
+            from transformers import Qwen3VLForConditionalGeneration
+
+            self.text_encoder = from_pretrained_with_prefetch(
+                Qwen3VLForConditionalGeneration.from_pretrained,
+                model,
+                subfolder="text_encoder",
+                prefetch_list=IDEOGRAM4_SUBFOLDERS,
+                local_files_only=local_files_only,
+            ).to(self._execution_device)
 
         # Tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(model, subfolder="tokenizer", local_files_only=local_files_only)
@@ -247,6 +268,72 @@ class Ideogram4Pipeline(
         self.setup_diffusion_pipeline_profiler(
             enable_diffusion_pipeline_profiler=self.od_config.enable_diffusion_pipeline_profiler
         )
+
+    def _load_text_encoder_ideogram_fp8(
+        self,
+        model: str,
+        device: torch.device,
+        dtype: torch.dtype,
+        local_files_only: bool,
+    ):
+        """Load Qwen3-VL text encoder with Ideogram-4's weight-only FP8 format.
+
+        transformers' from_pretrained can't read Ideogram's float8 layout, so we:
+        1. Instantiate the architecture with from_config
+        2. Swap the quantized Linears for Ideogram4Fp8Linear
+        3. Load the FP8 state dict with assign=True
+        """
+        from transformers import AutoConfig, AutoModel
+
+        from vllm_omni.diffusion.models.ideogram4.ideogram_fp8 import (
+            is_ideogram_fp8_state_dict,
+            load_ideogram_fp8_state_dict,
+            swap_linears_to_fp8,
+        )
+
+        # 1. Load config and create model architecture
+        config = AutoConfig.from_pretrained(
+            model, subfolder="text_encoder", local_files_only=local_files_only, trust_remote_code=True
+        )
+        text_encoder = AutoModel.from_config(config, trust_remote_code=True)
+
+        # 2. Load state dict
+        state_dict = self._load_text_encoder_state_dict(model, local_files_only)
+
+        # 3. Swap Linears to FP8 if needed
+        if is_ideogram_fp8_state_dict(state_dict):
+            swap_linears_to_fp8(text_encoder, state_dict, compute_dtype=dtype)
+
+        # 4. Load FP8 weights
+        load_ideogram_fp8_state_dict(text_encoder, state_dict, device=device, dtype=dtype, assign=True)
+
+        return text_encoder.eval()
+
+    def _load_text_encoder_state_dict(self, model: str, local_files_only: bool) -> dict[str, torch.Tensor]:
+        """Load text encoder state dict from safetensors (handles sharded and single file)."""
+        from huggingface_hub import hf_hub_download
+        from safetensors.torch import load_file
+
+        # Check for sharded checkpoint
+        try:
+            index_path = hf_hub_download(
+                model, "text_encoder/model.safetensors.index.json", local_files_only=local_files_only
+            )
+            with open(index_path) as f:
+                index = json.load(f)
+            weight_map = index["weight_map"]
+
+            # Load all shards
+            state_dict = {}
+            shards = sorted(set(weight_map.values()))
+            for shard in shards:
+                shard_path = hf_hub_download(model, f"text_encoder/{shard}", local_files_only=local_files_only)
+                state_dict.update(load_file(shard_path))
+            return state_dict
+        except Exception:
+            # Single file
+            model_path = hf_hub_download(model, "text_encoder/model.safetensors", local_files_only=local_files_only)
+            return load_file(model_path)
 
     @staticmethod
     def _prepare_ids(
