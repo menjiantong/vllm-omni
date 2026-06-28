@@ -105,3 +105,13 @@ class CuDNNAttentionImpl(AttentionImpl):
                 enable_gqa=self.requires_gqa,
             )
         return output.permute(0, 2, 1, 3)
+
+    @torch.compiler.disable
+    def forward(self, *args, **kwargs):
+        """Disable torch.compile for this attention implementation.
+
+        cuDNN attention with large head_dim (e.g., 256 for Ideogram4) fails
+        during Dynamo's fake tensor tracing. Disabling compilation allows
+        the runtime fallback to work correctly.
+        """
+        return super().forward(*args, **kwargs)
