@@ -171,10 +171,7 @@ class Ideogram4Attention(nn.Module):
             q = (q * cos) + (_rotate_half(q) * sin)
             k = (k * cos) + (_rotate_half(k) * sin)
 
-        # Reshape for attention: (B, num_heads, L, head_dim)
-        q = q.transpose(1, 2)
-        k = k.transpose(1, 2)
-        v = v.transpose(1, 2)
+        # Q/K/V shape: (B, S, num_heads, head_dim) - keep this format for SDPA
 
         # Attention
         attn_metadata = None
@@ -185,7 +182,7 @@ class Ideogram4Attention(nn.Module):
             attn_metadata = AttentionMetadata(attn_mask=attention_mask)
 
         hidden_states = self.attn(q, k, v, attn_metadata)
-        hidden_states = hidden_states.transpose(1, 2).reshape(B, S, self.hidden_size)
+        hidden_states = hidden_states.reshape(B, S, self.hidden_size)
 
         # Output projection
         hidden_states = self.o(hidden_states.contiguous())
