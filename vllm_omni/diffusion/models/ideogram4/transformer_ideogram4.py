@@ -181,6 +181,10 @@ class Ideogram4Attention(nn.Module):
         if attention_mask is not None:
             if attention_mask.dim() == 3:
                 attention_mask = attention_mask.unsqueeze(1)
+            # Expand mask from [B, 1, S, S] to [B, num_heads, S, S] for SDPA
+            # SDPA expects mask broadcastable to [B, num_heads, L, S] after internal permute
+            if attention_mask.shape[1] == 1:
+                attention_mask = attention_mask.expand(B, self.num_heads, -1, -1)
             attn_metadata = AttentionMetadata(attn_mask=attention_mask)
 
         hidden_states = self.attn(q, k, v, attn_metadata)
@@ -224,6 +228,7 @@ class Ideogram4TransformerBlock(nn.Module):
 
         self.adaln_modulation = nn.Linear(adaln_dim, 4 * hidden_size, bias=True)
 
+    @torch.compiler.disable
     def forward(
         self,
         hidden_states: torch.Tensor,
