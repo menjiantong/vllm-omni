@@ -251,14 +251,12 @@ class Ideogram4Pipeline(
         # Transformer (conditional)
         transformer_kwargs = get_transformer_config_kwargs(od_config.tf_model_config, Ideogram4Transformer2DModel)
         self.transformer = Ideogram4Transformer2DModel(
-            quant_config=od_config.quantization_config,
             od_config=od_config,
             **transformer_kwargs,
         )
 
         # Unconditional transformer
         self.unconditional_transformer = Ideogram4Transformer2DModel(
-            quant_config=od_config.quantization_config,
             od_config=od_config,
             **transformer_kwargs,
         )
