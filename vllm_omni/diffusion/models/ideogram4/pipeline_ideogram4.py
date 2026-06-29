@@ -217,14 +217,16 @@ class Ideogram4Pipeline(
         self.tokenizer = AutoTokenizer.from_pretrained(model, subfolder="tokenizer", local_files_only=local_files_only)
 
         # Ideogram4 uses head_dim=256 which is not supported by cuDNN attention kernels.
-        # Force TORCH_SDPA backend to avoid "No available kernel" errors.
+        # Default to TORCH_SDPA backend if not specified.
         from vllm_omni.diffusion.data import AttentionConfig, AttentionSpec
 
         if od_config.diffusion_attention_config is None:
             od_config.diffusion_attention_config = AttentionConfig()
         if od_config.diffusion_attention_config.default is None:
             od_config.diffusion_attention_config.default = AttentionSpec(backend="TORCH_SDPA")
-            logger.info("Ideogram4: forcing TORCH_SDPA attention backend (cuDNN does not support head_dim=256)")
+            logger.info(
+                "Ideogram4: using TORCH_SDPA as default attention backend (cuDNN does not support head_dim=256)"
+            )
 
         # Transformer (conditional)
         transformer_kwargs = get_transformer_config_kwargs(od_config.tf_model_config, Ideogram4Transformer2DModel)
