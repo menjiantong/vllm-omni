@@ -387,13 +387,7 @@ class Ideogram4Transformer2DModel(nn.Module):
             ]
         )
 
-        self.final_layer = Ideogram4FinalLayer(
-            hidden_size=hidden_size,
-            out_channels=in_channels,
-            adaln_dim=adaln_dim,
-            quant_config=quant_config,
-            prefix="final_layer",
-        )
+        self.final_layer = Ideogram4FinalLayer(hidden_size=hidden_size, out_channels=in_channels, adaln_dim=adaln_dim)
 
     @property
     def dtype(self) -> torch.dtype:
@@ -419,8 +413,7 @@ class Ideogram4Transformer2DModel(nn.Module):
 
         encoder_hidden_states = encoder_hidden_states * llm_token_mask
         hidden_states = hidden_states * output_image_mask
-        hidden_states_proj = self.input_proj(hidden_states)
-        hidden_states = hidden_states_proj * output_image_mask
+        hidden_states = self.input_proj(hidden_states) * output_image_mask
 
         t_cond = self.t_embedding(timestep)
         if timestep.dim() == 1:
@@ -428,8 +421,7 @@ class Ideogram4Transformer2DModel(nn.Module):
         adaln_input = F.silu(self.adaln_proj(t_cond))
 
         encoder_hidden_states = self.llm_cond_norm(encoder_hidden_states)
-        encoder_hidden_states_proj = self.llm_cond_proj(encoder_hidden_states)
-        encoder_hidden_states = encoder_hidden_states_proj * llm_token_mask
+        encoder_hidden_states = self.llm_cond_proj(encoder_hidden_states) * llm_token_mask
 
         hidden_states = hidden_states + encoder_hidden_states
 
