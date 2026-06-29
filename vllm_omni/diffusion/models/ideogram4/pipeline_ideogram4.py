@@ -204,36 +204,14 @@ class Ideogram4Pipeline(
         ).to(self._execution_device)
 
         # Text encoder (Qwen3-VL)
-        # Check if text_encoder uses Ideogram's weight-only FP8 format
-        from huggingface_hub import hf_hub_download
-
-        try:
-            text_encoder_config_path = hf_hub_download(
-                model, "text_encoder/config.json", local_files_only=local_files_only
-            )
-            with open(text_encoder_config_path) as f:
-                text_encoder_config_dict = json.load(f)
-            is_ideogram_fp8 = text_encoder_config_dict.get("ideogram_fp8_weight_only", False)
-        except Exception:
-            is_ideogram_fp8 = False
-
-        if is_ideogram_fp8:
-            # Use custom FP8 loading for Ideogram-4's weight-only FP8 format
+        if "ideogram-4-fp8" in model:
             self.text_encoder = self._load_text_encoder_ideogram_fp8(
                 model, self._execution_device, od_config.dtype, local_files_only
             )
-            logger.info("Loaded text_encoder with Ideogram-4 weight-only FP8 format")
         else:
-            # Standard loading
-            from transformers import Qwen3VLForConditionalGeneration
-
-            self.text_encoder = from_pretrained_with_prefetch(
-                Qwen3VLForConditionalGeneration.from_pretrained,
-                model,
-                subfolder="text_encoder",
-                prefetch_list=IDEOGRAM4_SUBFOLDERS,
-                local_files_only=local_files_only,
-            ).to(self._execution_device)
+            raise NotImplementedError(
+                f"Model {model} is not supported. Only ideogram-ai/ideogram-4-fp8 is currently supported."
+            )
 
         # Tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(model, subfolder="tokenizer", local_files_only=local_files_only)
