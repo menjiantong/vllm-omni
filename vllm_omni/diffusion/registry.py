@@ -311,6 +311,11 @@ _DIFFUSION_MODELS = {
         "pipeline_krea2",
         "Krea2Pipeline",
     ),
+    "Ideogram4Pipeline": (
+        "ideogram4",
+        "pipeline_ideogram4",
+        "Ideogram4Pipeline",
+    )
 }
 
 
@@ -539,6 +544,7 @@ _DIFFUSION_POST_PROCESS_FUNCS = {
     "HiDreamImagePipeline": "get_hidream_image_post_process_func",
     "StableDiffusionXLPipeline": "get_sdxl_image_post_process_func",
     "Krea2Pipeline": "get_krea2_post_process_func",
+    "Ideogram4Pipeline": "get_ideogram4_post_process_func"
 }
 
 _DIFFUSION_ACTION_POST_PROCESS_FUNCS = {
