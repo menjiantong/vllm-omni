@@ -13,11 +13,6 @@ import torch.nn.functional as F
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.normalization import RMSNorm as DiffusersRMSNorm
 from vllm.model_executor.layers.layernorm import RMSNorm
-from vllm.model_executor.layers.linear import (
-    MergedColumnParallelLinear,
-    QKVParallelLinear,
-    RowParallelLinear,
-)
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
@@ -99,35 +94,24 @@ class Ideogram4MLP(nn.Module):
         prefix: str = "",
     ) -> None:
         super().__init__()
-        # For TP: w1 and w3 are ColumnParallel (fused), w2 is RowParallel
-        self.w1w3 = MergedColumnParallelLinear(
-            dim,
-            [hidden_dim, hidden_dim],
-            bias=False,
-            return_bias=False,
-            quant_config=quant_config,
-            prefix=_join_prefix(prefix, "w1w3"),
-        )
-        self.w2 = RowParallelLinear(
-            hidden_dim,
-            dim,
-            bias=False,
-            input_is_parallel=True,
-            return_bias=False,
-            quant_config=quant_config,
-            prefix=_join_prefix(prefix, "w2"),
-        )
+        self.w1 = nn.Linear(dim, hidden_dim, bias=False)
+        self.w3 = nn.Linear(dim, hidden_dim, bias=False)
+        self.w2 = nn.Linear(hidden_dim, dim, bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x, _ = self.w1w3(x)
-        x1, x3 = x.chunk(2, dim=-1)
+        x1 = self.w1(x)
+        x3 = self.w3(x)
         x = F.silu(x1) * x3
-        x, _ = self.w2(x)
+        x = self.w2(x)
         return x
 
 
 class Ideogram4Attention(nn.Module):
-    """Self-attention with split Q/K/V, q/k RMSNorm, and MRoPE."""
+    """Self-attention with merged QKV projection, q/k RMSNorm, and MRoPE.
+
+    Note: This uses merged QKV projection (matching the checkpoint format)
+    instead of separate to_q/to_k/to_v projections.
+    """
 
     def __init__(
         self,
@@ -144,43 +128,22 @@ class Ideogram4Attention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = hidden_size // num_heads
 
-        # TP: QKV fused projection
-        self.to_qkv = QKVParallelLinear(
-            hidden_size=hidden_size,
-            head_size=self.head_dim,
-            total_num_heads=num_heads,
-            total_num_kv_heads=num_heads,
-            bias=False,
-            quant_config=quant_config,
-            prefix=_join_prefix(prefix, "to_qkv"),
-        )
-        self.query_num_heads = self.to_qkv.num_heads
-        self.kv_num_heads = self.to_qkv.num_kv_heads
+        # Merged QKV projection (matches checkpoint: attention.qkv.weight)
+        self.qkv = nn.Linear(hidden_size, 3 * hidden_size, bias=False)
 
+        # Q/K normalization (per-head RMSNorm)
         self.norm_q = RMSNorm(self.head_dim, eps=eps)
         self.norm_k = RMSNorm(self.head_dim, eps=eps)
 
-        self.to_out = nn.ModuleList(
-            [
-                RowParallelLinear(
-                    hidden_size,
-                    hidden_size,
-                    bias=False,
-                    input_is_parallel=True,
-                    return_bias=False,
-                    quant_config=quant_config,
-                    prefix=_join_prefix(prefix, "to_out.0"),
-                ),
-                nn.Dropout(0.0),
-            ]
-        )
+        # Output projection (matches checkpoint: attention.o.weight)
+        self.o = nn.Linear(hidden_size, hidden_size, bias=False)
 
         self.attn = Attention(
-            num_heads=self.query_num_heads,
+            num_heads=self.num_heads,
             head_size=self.head_dim,
             softmax_scale=1.0 / (self.head_dim**0.5),
             causal=False,
-            num_kv_heads=self.kv_num_heads,
+            num_kv_heads=self.num_heads,
         )
 
     def forward(
@@ -189,37 +152,40 @@ class Ideogram4Attention(nn.Module):
         attention_mask: torch.Tensor | None = None,
         image_rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> torch.Tensor:
-        qkv, _ = self.to_qkv(hidden_states)
-        query, key, value = qkv.chunk(3, dim=-1)
+        B, S, _ = hidden_states.shape
 
-        # Reshape to (B, L, heads, head_dim) for norm and rope
-        query = query.unflatten(-1, (self.query_num_heads, -1))
-        key = key.unflatten(-1, (self.kv_num_heads, -1))
-        value = value.unflatten(-1, (self.kv_num_heads, -1))
+        # Merged QKV projection
+        qkv = self.qkv(hidden_states)
+        qkv = qkv.view(B, S, 3, self.num_heads, self.head_dim)
+        q, k, v = qkv.unbind(dim=2)  # Each: (B, S, num_heads, head_dim)
 
-        query = self.norm_q(query)
-        key = self.norm_k(key)
+        # Q/K normalization
+        q = self.norm_q(q)
+        k = self.norm_k(k)
 
         # Apply MRoPE
         if image_rotary_emb is not None:
             cos, sin = image_rotary_emb
             cos = cos.unsqueeze(2)  # (B, L, 1, head_dim)
             sin = sin.unsqueeze(2)
-            query = (query * cos) + (_rotate_half(query) * sin)
-            key = (key * cos) + (_rotate_half(key) * sin)
+            q = (q * cos) + (_rotate_half(q) * sin)
+            k = (k * cos) + (_rotate_half(k) * sin)
+
+        # Q/K/V shape: (B, S, num_heads, head_dim) - keep this format for SDPA
 
         # Attention
         attn_metadata = None
         if attention_mask is not None:
             if attention_mask.dim() == 3:
                 attention_mask = attention_mask.unsqueeze(1)
+            # Keep mask as [B, 1, S, S] for SDPA to broadcast
             attn_metadata = AttentionMetadata(attn_mask=attention_mask)
 
-        hidden_states = self.attn(query, key, value, attn_metadata)
-        hidden_states = hidden_states.flatten(2, 3)
+        hidden_states = self.attn(q, k, v, attn_metadata)
+        hidden_states = hidden_states.reshape(B, S, self.hidden_size)
 
-        hidden_states, _ = self.to_out[0](hidden_states.contiguous())
-        hidden_states = self.to_out[1](hidden_states)
+        # Output projection
+        hidden_states = self.o(hidden_states.contiguous())
         return hidden_states
 
 
@@ -317,7 +283,14 @@ class Ideogram4EmbedScalar(nn.Module):
 
 
 class Ideogram4FinalLayer(nn.Module):
-    def __init__(self, hidden_size: int, out_channels: int, adaln_dim: int) -> None:
+    def __init__(
+        self,
+        hidden_size: int,
+        out_channels: int,
+        adaln_dim: int,
+        quant_config: "QuantizationConfig | None" = None,
+        prefix: str = "",
+    ) -> None:
         super().__init__()
         self.norm_final = nn.LayerNorm(hidden_size, eps=1e-6, elementwise_affine=False)
         self.linear = nn.Linear(hidden_size, out_channels, bias=True)
@@ -325,7 +298,8 @@ class Ideogram4FinalLayer(nn.Module):
 
     def forward(self, hidden_states: torch.Tensor, conditioning: torch.Tensor) -> torch.Tensor:
         scale = 1.0 + self.adaln_modulation(F.silu(conditioning))
-        return self.linear(self.norm_final(hidden_states) * scale)
+        output = self.linear(self.norm_final(hidden_states) * scale)
+        return output
 
 
 class Ideogram4Transformer2DModel(nn.Module):
@@ -417,6 +391,8 @@ class Ideogram4Transformer2DModel(nn.Module):
             hidden_size=hidden_size,
             out_channels=in_channels,
             adaln_dim=adaln_dim,
+            quant_config=quant_config,
+            prefix="final_layer",
         )
 
     @property
@@ -443,7 +419,8 @@ class Ideogram4Transformer2DModel(nn.Module):
 
         encoder_hidden_states = encoder_hidden_states * llm_token_mask
         hidden_states = hidden_states * output_image_mask
-        hidden_states = self.input_proj(hidden_states) * output_image_mask
+        hidden_states_proj = self.input_proj(hidden_states)
+        hidden_states = hidden_states_proj * output_image_mask
 
         t_cond = self.t_embedding(timestep)
         if timestep.dim() == 1:
@@ -451,7 +428,8 @@ class Ideogram4Transformer2DModel(nn.Module):
         adaln_input = F.silu(self.adaln_proj(t_cond))
 
         encoder_hidden_states = self.llm_cond_norm(encoder_hidden_states)
-        encoder_hidden_states = self.llm_cond_proj(encoder_hidden_states) * llm_token_mask
+        encoder_hidden_states_proj = self.llm_cond_proj(encoder_hidden_states)
+        encoder_hidden_states = encoder_hidden_states_proj * llm_token_mask
 
         hidden_states = hidden_states + encoder_hidden_states
 
@@ -481,47 +459,47 @@ class Ideogram4Transformer2DModel(nn.Module):
         return Transformer2DModelOutput(sample=output)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        stacked_params_mapping = [
-            # Map fused w1w3 back to separate w1 and w3 for weight loading
-            (".w1w3.", ".w1.", "w1"),
-            (".w1w3.", ".w3.", "w3"),
-            # Map fused to_qkv back to separate to_q, to_k, to_v
-            (".to_qkv.", ".to_q.", "q"),
-            (".to_qkv.", ".to_k.", "k"),
-            (".to_qkv.", ".to_v.", "v"),
-        ]
-        self.stacked_params_mapping = stacked_params_mapping
+        # Convert to list to allow multiple passes (FP8 detection + actual loading)
+        weights_list = list(weights)
 
+        # Check if checkpoint uses Ideogram's weight-only FP8 format
+        from vllm_omni.diffusion.models.ideogram4.ideogram_fp8 import (
+            is_ideogram_fp8_state_dict,
+            swap_linears_to_fp8,
+        )
+
+        # Build state dict for FP8 detection
+        state_dict = {name: tensor for name, tensor in weights_list}
+
+        if is_ideogram_fp8_state_dict(state_dict):
+            # Swap nn.Linear to Ideogram4Fp8Linear before loading
+            # This must happen before we try to load weight_scale buffers
+            swap_linears_to_fp8(self, state_dict, compute_dtype=self.dtype)
+
+        # Now load the weights
         params_dict = dict(self.named_parameters())
-
-        for name, buffer in self.named_buffers():
-            if name.endswith(".beta") or name.endswith(".eps"):
-                params_dict[name] = buffer
+        buffers_dict = dict(self.named_buffers())
 
         loaded_params: set[str] = set()
-        for name, loaded_weight in weights:
-            original_name = name
-            mapped = False
-            for param_name, weight_name, shard_id in stacked_params_mapping:
-                if weight_name not in original_name:
-                    continue
-                name = original_name.replace(weight_name, param_name)
-                param = params_dict.get(name)
-                if param is None:
-                    break
-                weight_loader = param.weight_loader
-                weight_loader(param, loaded_weight, shard_id)
-                loaded_params.add(name)
-                mapped = True
-                break
-            if mapped:
-                continue
-
+        for original_name, loaded_weight in weights_list:
+            # AutoWeightsLoader passes names with prefix like "transformer.layers.0..."
+            # We need to strip the prefix to match params_dict
             name = original_name
-            if name not in params_dict:
-                continue
-            param = params_dict[name]
-            weight_loader = getattr(param, "weight_loader", default_weight_loader)
-            weight_loader(param, loaded_weight)
-            loaded_params.add(name)
+            if name.startswith("transformer."):
+                name = name[len("transformer.") :]
+            elif name.startswith("unconditional_transformer."):
+                name = name[len("unconditional_transformer.") :]
+
+            # Check if it's a parameter or buffer
+            if name in params_dict:
+                param = params_dict[name]
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                weight_loader(param, loaded_weight)
+                loaded_params.add(original_name)
+            elif name in buffers_dict:
+                # For weight_scale and other buffers
+                buffer = buffers_dict[name]
+                buffer.copy_(loaded_weight)
+                loaded_params.add(original_name)
+
         return loaded_params
