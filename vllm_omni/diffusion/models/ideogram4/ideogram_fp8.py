@@ -58,23 +58,16 @@ class Ideogram4Fp8Linear(nn.Module):
         self.out_features = out_features
         self.compute_dtype = compute_dtype
 
-        if USE_DEQUANT_WEIGHTS:
-            # Pre-dequantize mode: store dequantized weights in compute_dtype
-            self.register_buffer(
-                "weight",
-                torch.empty(out_features, in_features, dtype=compute_dtype),
-            )
-            self.register_buffer("weight_scale", None)
-        else:
-            # Dynamic dequantize mode (default): store FP8 weights and scale
-            self.register_buffer(
-                "weight",
-                torch.empty(out_features, in_features, dtype=FP8_WEIGHT_DTYPE),
-            )
-            self.register_buffer(
-                "weight_scale",
-                torch.empty(out_features, dtype=torch.float32),
-            )
+        # Always register weight as FP8 dtype for loading compatibility
+        # When USE_DEQUANT_WEIGHTS=1, it will be converted after loading
+        self.register_buffer(
+            "weight",
+            torch.empty(out_features, in_features, dtype=FP8_WEIGHT_DTYPE),
+        )
+        self.register_buffer(
+            "weight_scale",
+            torch.empty(out_features, dtype=torch.float32),
+        )
 
         if bias:
             self.register_buffer("bias", torch.empty(out_features, dtype=compute_dtype))
@@ -82,9 +75,8 @@ class Ideogram4Fp8Linear(nn.Module):
             self.bias = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if USE_DEQUANT_WEIGHTS:
-            # Weights already dequantized at load time, directly use
-            # (weight is already on correct device and dtype from load)
+        if USE_DEQUANT_WEIGHTS and self.weight.dtype == self.compute_dtype:
+            # Pre-dequantized mode: weight already in compute_dtype
             bias = self.bias if self.bias is not None else None
             return F.linear(x, self.weight, bias)
         else:
@@ -108,7 +100,10 @@ class Ideogram4Fp8Linear(nn.Module):
 
         scale = self.weight_scale.to(dtype=self.compute_dtype).unsqueeze(1)
         w_fp8 = self.weight.to(dtype=self.compute_dtype)
-        self.weight.copy_(w_fp8 * scale)
+
+        # Dequantize and store back in compute_dtype
+        self.weight = nn.Parameter(w_fp8 * scale, requires_grad=False)
+        del self.weight_scale
         self.weight_scale = None
 
     def extra_repr(self) -> str:
@@ -187,6 +182,10 @@ def load_ideogram_fp8_state_dict(
             prepared[k] = v.to(device=device)
 
     missing, unexpected = model.load_state_dict(prepared, strict=False, assign=assign)
+
+    # Filter out weight_scale keys for modules that weren't swapped
+    unexpected = [k for k in unexpected if not k.endswith(FP8_SCALE_SUFFIX)]
+
     if unexpected:
         raise RuntimeError(f"unexpected keys after fp8 load: {unexpected[:10]}")
     if missing and strict:
