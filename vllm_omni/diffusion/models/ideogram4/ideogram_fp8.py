@@ -11,6 +11,7 @@ Ideogram-4's offline quantization format:
 
 from __future__ import annotations
 
+import os
 import warnings
 from typing import TYPE_CHECKING
 
@@ -25,6 +26,10 @@ FP8_E4M3_MAX = 448.0
 FP8_WEIGHT_DTYPE = torch.float8_e4m3fn
 FP8_SCALE_SUFFIX = ".weight_scale"
 
+# Environment variable to control load-time dequantization
+# USE_DEQUANT_WEIGHTS=1 enables pre-dequantization (trades 2x memory for faster forward)
+USE_DEQUANT_WEIGHTS = os.environ.get("USE_DEQUANT_WEIGHTS", "0") in ("1", "true", "True")
+
 
 class Ideogram4Fp8Linear(nn.Module):
     """Linear layer with weight-only FP8 (E4M3FN) + per-row scale.
@@ -38,7 +43,7 @@ class Ideogram4Fp8Linear(nn.Module):
     """
 
     weight: torch.Tensor
-    weight_scale: torch.Tensor
+    weight_scale: torch.Tensor | None
     bias: torch.Tensor | None
 
     def __init__(
@@ -53,35 +58,63 @@ class Ideogram4Fp8Linear(nn.Module):
         self.out_features = out_features
         self.compute_dtype = compute_dtype
 
-        # Weight stored as FP8 E4M3FN
-        self.register_buffer(
-            "weight",
-            torch.empty(out_features, in_features, dtype=FP8_WEIGHT_DTYPE),
-        )
-        # Per-row scale (per-output-channel)
-        self.register_buffer(
-            "weight_scale",
-            torch.empty(out_features, dtype=torch.float32),
-        )
+        if USE_DEQUANT_WEIGHTS:
+            # Pre-dequantize mode: store dequantized weights in compute_dtype
+            self.register_buffer(
+                "weight",
+                torch.empty(out_features, in_features, dtype=compute_dtype),
+            )
+            self.register_buffer("weight_scale", None)
+        else:
+            # Dynamic dequantize mode (default): store FP8 weights and scale
+            self.register_buffer(
+                "weight",
+                torch.empty(out_features, in_features, dtype=FP8_WEIGHT_DTYPE),
+            )
+            self.register_buffer(
+                "weight_scale",
+                torch.empty(out_features, dtype=torch.float32),
+            )
+
         if bias:
             self.register_buffer("bias", torch.empty(out_features, dtype=compute_dtype))
         else:
             self.bias = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Dequantize: weight_fp8 * scale
-        # weight: (out, in), weight_scale: (out,)
-        # Move weights to the same device as input
-        w = self.weight.to(device=x.device, dtype=x.dtype)
-        scale = self.weight_scale.to(device=x.device, dtype=x.dtype).unsqueeze(1)
-        w = w * scale
-        bias = self.bias.to(device=x.device, dtype=x.dtype) if self.bias is not None else None
-        return F.linear(x, w, bias)
+        if USE_DEQUANT_WEIGHTS:
+            # Weights already dequantized at load time, directly use
+            # (weight is already on correct device and dtype from load)
+            bias = self.bias if self.bias is not None else None
+            return F.linear(x, self.weight, bias)
+        else:
+            # Dynamic dequantization (original behavior)
+            w = self.weight.to(device=x.device, dtype=x.dtype)
+            scale = self.weight_scale.to(device=x.device, dtype=x.dtype).unsqueeze(1)
+            w = w * scale
+            bias = self.bias.to(device=x.device, dtype=x.dtype) if self.bias is not None else None
+            return F.linear(x, w, bias)
+
+    def dequantize_weights(self) -> None:
+        """Dequantize FP8 weights to compute_dtype.
+
+        Only called when USE_DEQUANT_WEIGHTS=1, after weights are loaded.
+        """
+        if not USE_DEQUANT_WEIGHTS:
+            return
+
+        if self.weight_scale is None:
+            return  # Already dequantized
+
+        scale = self.weight_scale.to(dtype=self.compute_dtype).unsqueeze(1)
+        w_fp8 = self.weight.to(dtype=self.compute_dtype)
+        self.weight.copy_(w_fp8 * scale)
+        self.weight_scale = None
 
     def extra_repr(self) -> str:
         return (
             f"in_features={self.in_features}, out_features={self.out_features}, "
-            f"weight_dtype={FP8_WEIGHT_DTYPE}, compute_dtype={self.compute_dtype}"
+            f"weight_dtype={self.weight.dtype}, compute_dtype={self.compute_dtype}"
         )
 
 
@@ -162,6 +195,12 @@ def load_ideogram_fp8_state_dict(
         warnings.warn(f"missing keys after fp8 load: {missing[:10]}", stacklevel=2)
 
     model.to(device)
+
+    # Dequantize weights if USE_DEQUANT_WEIGHTS is enabled
+    if USE_DEQUANT_WEIGHTS:
+        for module in model.modules():
+            if isinstance(module, Ideogram4Fp8Linear):
+                module.dequantize_weights()
 
 
 def quantize_weight_to_fp8(weight: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

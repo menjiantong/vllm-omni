@@ -414,6 +414,8 @@ class Ideogram4Transformer2DModel(nn.Module):
 
         # Check if checkpoint uses Ideogram's weight-only FP8 format
         from vllm_omni.diffusion.models.ideogram4.ideogram_fp8 import (
+            USE_DEQUANT_WEIGHTS,
+            Ideogram4Fp8Linear,
             is_ideogram_fp8_state_dict,
             swap_linears_to_fp8,
         )
@@ -451,5 +453,11 @@ class Ideogram4Transformer2DModel(nn.Module):
                 buffer = buffers_dict[name]
                 buffer.copy_(loaded_weight)
                 loaded_params.add(original_name)
+
+        # Dequantize weights if USE_DEQUANT_WEIGHTS is enabled
+        if USE_DEQUANT_WEIGHTS:
+            for module in self.modules():
+                if isinstance(module, Ideogram4Fp8Linear):
+                    module.dequantize_weights()
 
         return loaded_params
